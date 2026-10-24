@@ -12,6 +12,11 @@ Abre `index.html` con doble clic (o publícalo en GitHub Pages). No necesita ser
 - **Sala auxiliar**: se activa por semana; las partes de estudiante de ambas salas se editan juntas, y el programa impreso las muestra en dos columnas.
 - **Problemas**: la semana avisa si hay alguien ausente, inactivo, no habilitado, repetido o en una pareja no válida.
 - **Estadísticas**: más y menos participaciones, partes por mes y por tipo, mapa de quién hace qué, reparto entre sala principal y auxiliar, parejas más repetidas y sustituciones (motivos, a quién y quién cubre). Por periodo (3, 6, 12 meses, año de servicio o todo).
+- **Importar historial** desde Excel (.xlsx) o CSV, en formato cuadrante (una fila por semana) o lista (una fila por asignación). Ver el formato en [ayuda.html](ayuda.html).
+- **Semanas especiales**: visita del superintendente (cambia el día y pone su discurso en lugar del estudio), asamblea y Conmemoración, marcadas con antelación.
+- **Hoja del presidente** con la hora de cada momento de la reunión, y **calendario (.ics)** del mes o de cada publicador con recordatorios.
+- **Sincronización automática**: al volver a la app recoge los cambios hechos en Drive desde otro dispositivo.
+- **Modo demostración** (`?demo=1`) con una congregación inventada y **guía de uso** con capturas y PDF de ejemplo en [ayuda.html](ayuda.html).
 - **Deshacer** (botón o Ctrl+Z), **exportar el historial a CSV** e **instalable** en el móvil (funciona sin conexión).
 - **Publicar / sustituciones**: una semana publicada queda bloqueada; cambiar a alguien se hace con «Sustituir», que pide motivo y queda registrado.
 - **Historial**: resumen por publicador (ordenado por quién lleva más tiempo sin intervenir, con recuento por tipo de parte), detalle filtrable y lista de sustituciones.

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guía Cuadrante VMC</title>
+  <meta name="description" content="Cómo funciona la app del cuadrante de la reunión Vida y Ministerio Cristiano, paso a paso.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: light;
+      --text: #1c1c1e; --muted: #6e6e73; --line: rgba(60, 60, 67, .13);
+      --accent: #007aff; --tesoros: #2f7f8c; --maestros: #c58312; --vida: #a8321f;
+      --vidrio: saturate(180%) blur(22px);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--text);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      background: #eef1f8 fixed;
+      background-image:
+        radial-gradient(at 6% 0%, #d6e4ff 0, transparent 45%),
+        radial-gradient(at 96% 6%, #ffdfe9 0, transparent 40%),
+        radial-gradient(at 80% 75%, #ebe2ff 0, transparent 42%),
+        radial-gradient(at 12% 92%, #dcf5ea 0, transparent 45%);
+      -webkit-font-smoothing: antialiased;
+    }
+    header.top {
+      position: sticky; top: 0; z-index: 5;
+      background: rgba(255, 255, 255, .7); -webkit-backdrop-filter: var(--vidrio); backdrop-filter: var(--vidrio);
+      border-bottom: 1px solid rgba(255, 255, 255, .7); box-shadow: 0 1px 0 rgba(60, 60, 67, .08);
+    }
+    .top-in { max-width: 1040px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .logo { background: linear-gradient(135deg, #d9452f, #a8321f); color: #fff; border-radius: 9px; padding: 3px 8px; font-size: 13px; font-weight: 700; }
+    .top nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+    .top nav a { color: var(--text); text-decoration: none; font-size: 14px; padding: 5px 11px; border-radius: 99px; }
+    .top nav a:hover { background: rgba(118, 118, 128, .12); }
+    main { max-width: 1040px; margin: 0 auto; padding: 28px 16px 80px; }
+    h1 { font-size: clamp(28px, 5vw, 40px); letter-spacing: -.02em; margin: 6px 0 8px; line-height: 1.1; }
+    h2 { font-size: 24px; letter-spacing: -.01em; margin: 0 0 6px; }
+    h3 { font-size: 17px; margin: 18px 0 6px; }
+    p { margin: 0 0 10px; }
+    .lead { font-size: 18px; color: #3a3a3c; max-width: 720px; }
+    .muted { color: var(--muted); }
+    .card {
+      background: rgba(255, 255, 255, .62); -webkit-backdrop-filter: var(--vidrio); backdrop-filter: var(--vidrio);
+      border: 1px solid rgba(255, 255, 255, .75); border-radius: 22px;
+      box-shadow: 0 10px 30px rgba(31, 38, 64, .08), 0 1px 2px rgba(31, 38, 64, .06);
+      padding: 22px; margin: 18px 0;
+    }
+    .btn { display: inline-block; text-decoration: none; border-radius: 12px; padding: 9px 16px; font-weight: 600; border: 1px solid rgba(60, 60, 67, .14); background: rgba(255, 255, 255, .8); color: var(--text); }
+    .btn.primary { background: linear-gradient(180deg, #2b8cff, #007aff); color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(0, 122, 255, .28); }
+    .botones { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .paso { display: grid; grid-template-columns: 1fr 1.3fr; gap: 24px; align-items: start; }
+    .paso.inverso { grid-template-columns: 1.3fr 1fr; }
+    .paso.inverso .texto { order: 2; }
+    .num { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 15px; margin-right: 8px; vertical-align: 2px; }
+    .shot { width: 100%; border-radius: 14px; border: 1px solid rgba(60, 60, 67, .12); box-shadow: 0 8px 24px rgba(31, 38, 64, .12); display: block; background: #fff; }
+    .shot.recorte { aspect-ratio: 16 / 11; object-fit: cover; object-position: top; }
+    figure { margin: 0; }
+    figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    ul.lista { margin: 6px 0 10px; padding-left: 20px; }
+    ul.lista li { margin: 3px 0; }
+    .pdfs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .pdf { display: flex; flex-direction: column; gap: 8px; }
+    .pdf img { aspect-ratio: 210 / 297; object-fit: cover; object-position: top; }
+    .pdf b { font-size: 16px; }
+    .etiqueta { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 99px; background: rgba(0, 122, 255, .12); color: var(--accent); font-weight: 600; }
+    table.ej { border-collapse: collapse; width: 100%; font-size: 13.5px; background: #fff; border-radius: 10px; overflow: hidden; }
+    table.ej th, table.ej td { border: 1px solid #e2e4ea; padding: 5px 8px; text-align: left; white-space: nowrap; }
+    table.ej th { background: #f3f5f9; font-weight: 600; }
+    .tabla { overflow-x: auto; margin: 8px 0 14px; }
+    .flujo { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 14px; }
+    .flujo div { background: rgba(255, 255, 255, .75); border: 1px solid rgba(255, 255, 255, .9); border-radius: 14px; padding: 10px; font-size: 13.5px; text-align: center; }
+    .flujo b { display: block; font-size: 22px; }
+    .nota { border-left: 4px solid var(--accent); background: rgba(0, 122, 255, .06); padding: 10px 14px; border-radius: 0 12px 12px 0; margin: 10px 0; }
+    @media (max-width: 820px) {
+      .paso, .paso.inverso { grid-template-columns: 1fr; }
+      .paso.inverso .texto { order: 0; }
+      .pdfs { grid-template-columns: 1fr; }
+      .flujo { grid-template-columns: repeat(3, 1fr); }
+      .top nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top"><div class="top-in">
+    <span class="logo">VMC</span><b>Guía del cuadrante</b>
+    <nav>
+      <a href="#publicadores">Publicadores</a><a href="#historial">Historial</a><a href="#programa">Programa</a>
+      <a href="#asignar">Asignar</a><a href="#avisos">Avisos</a><a href="#estadisticas">Estadísticas</a><a href="#pdf">PDF</a><a href="#excel">Formato Excel</a>
+    </nav>
+  </div></header>
+
+  <main>
+    <section>
+      <span class="etiqueta">Cómo funciona</span>
+      <h1>El cuadrante de Vida y Ministerio, de principio a fin</h1>
+      <p class="lead">Esta guía recorre la app con una congregación inventada. Las capturas y los PDF son exactamente lo que verás tú. Puedes abrir la misma demostración y tocarlo todo: no se mezcla con tus datos.</p>
+      <div class="botones">
+        <a class="btn primary" href="./?demo=1" target="_blank" rel="noopener">▶ Abrir la demostración</a>
+        <a class="btn" href="./">Ir a mi cuadrante</a>
+      </div>
+      <div class="flujo">
+        <div><b>1</b>Publicadores</div><div><b>2</b>Historial anterior</div><div><b>3</b>Programa de jw.org</div>
+        <div><b>4</b>Asignar con sugerencias</div><div><b>5</b>Publicar y avisar</div><div><b>6</b>Imprimir y controlar</div>
+      </div>
+    </section>
+
+    <section class="card" id="publicadores">
+      <div class="paso">
+        <div class="texto">
+          <h2><span class="num">1</span>Publicadores</h2>
+          <p>Cada publicador tiene su ficha. Esta información es la que usan las sugerencias:</p>
+          <ul class="lista">
+            <li><b>Privilegio</b> (anciano, siervo ministerial, publicador bautizado o no bautizado) y <b>sexo</b>.</li>
+            <li><b>Asignaciones que puede hacer</b>: un botón marca las típicas de su privilegio y luego se ajustan a mano.</li>
+            <li><b>Solo ayudante</b>, <b>sala preferida</b> y <b>semanas mínimas</b> entre partes.</li>
+            <li><b>Familia</b>: permite emparejar a un hermano y una hermana de la misma familia.</li>
+            <li><b>Ausencias</b> con fechas, <b>teléfono</b> para WhatsApp y notas.</li>
+          </ul>
+          <p class="muted">La lista muestra cuántas partes tuvo cada uno en los últimos 6 meses, cuál fue la última y cuál es la próxima.</p>
+        </div>
+        <figure><img class="shot recorte" src="ayuda/publicadores.png" alt="Lista de publicadores con privilegios, asignaciones y última parte"><figcaption>Pestaña Publicadores.</figcaption></figure>
+      </div>
+    </section>
+
+    <section class="card" id="historial">
+      <div class="paso inverso">
+        <div class="texto">
+          <h2><span class="num">2</span>Historial anterior (Excel)</h2>
+          <p>Si ya llevabais las asignaciones en Excel, impórtalas en <b>Historial → 📄 Importar historial</b> o en <b>Ajustes</b>. Así las sugerencias saben desde el primer día quién hizo qué y cuándo.</p>
+          <ul class="lista">
+            <li>Acepta <b>.xlsx</b> y <b>.csv</b> (el .xls antiguo hay que guardarlo antes como .xlsx).</li>
+            <li>Reconoce las columnas automáticamente; puedes corregir cualquiera antes de importar.</li>
+            <li>Los nombres se buscan en la lista de publicadores, también escritos como «Apellidos, Nombre». Los que no aparecen se pueden crear con un clic.</li>
+            <li>Si importas dos veces el mismo archivo no se duplica nada.</li>
+          </ul>
+          <p><a href="#excel">Ver el formato del Excel ↓</a></p>
+        </div>
+        <figure><img class="shot recorte" src="ayuda/historial.png" alt="Historial con resumen por publicador"><figcaption>Historial: resumen por publicador, ordenado por quién lleva más tiempo sin intervenir.</figcaption></figure>
+      </div>
+    </section>
+
+    <section class="card" id="programa">
+      <h2><span class="num">3</span>Programa de la semana</h2>
+      <p>En <b>Cuadrante → 📥 Importar de jw.org</b> eliges la Guía de actividades y pulsas «Descargar EPUB». Después cargas ese archivo en la misma ventana. La app crea las semanas con todas las partes: número, título, minutos, lección, lectura semanal y canciones. Si una semana ya existía, conserva a las personas que tenía asignadas.</p>
+      <div class="nota"><b>Semanas especiales.</b> En Ajustes (o en cada semana) se marcan con antelación la <b>visita del superintendente</b> (cambia el día de la reunión y pone su discurso en lugar del estudio bíblico), las <b>asambleas</b> y la <b>Conmemoración</b> (sin reunión). Al crear o importar esas semanas se ajustan solas.</div>
+      <p class="muted">La sala auxiliar se activa o se quita en cada semana. Sus partes se editan junto a las de la sala principal.</p>
+    </section>
+
+    <section class="card" id="asignar">
+      <div class="paso">
+        <div class="texto">
+          <h2><span class="num">4</span>Asignar con sugerencias</h2>
+          <p>Cada puesto tiene un desplegable que muestra primero a los <b>sugeridos</b>, con lo que conviene saber: «esta parte hace 7 semanas · 13 en 6 meses».</p>
+          <p>Primero quedan fuera:</p>
+          <ul class="lista">
+            <li>quienes no están habilitados para esa parte;</li>
+            <li>quienes están ausentes;</li>
+            <li>quienes ya tienen parte esa semana;</li>
+            <li>los ayudantes de distinto sexo que no son de la misma familia.</li>
+          </ul>
+          <p>Después se ordena a los demás:</p>
+          <ul class="lista">
+            <li>va primero quien lleva más tiempo sin esa parte y sin intervenir;</li>
+            <li>baja quien tiene más carga en los últimos 6 meses, una parte demasiado cerca, una pareja repetida o no prefiere esa sala.</li>
+          </ul>
+          <p><b>🔍</b> abre la lista completa de candidatos y explica el porqué de cada uno. <b>✨ Sugerir vacíos</b> rellena la semana empezando por los puestos más difíciles de cubrir. <b>Rellenar varias semanas</b> reparte hasta 12 semanas de golpe.</p>
+          <p>Si algo no cuadra (alguien ausente, repetido o no habilitado), la semana lo avisa en rojo.</p>
+        </div>
+        <figure><img class="shot recorte" src="ayuda/cuadrante.png" alt="Editor de la semana con sala principal y auxiliar"><figcaption>Una semana con visita del superintendente (reunión el martes) y sala auxiliar.</figcaption></figure>
+      </div>
+      <div class="paso" style="margin-top:22px">
+        <figure><img class="shot recorte" src="ayuda/mes.png" alt="Vista mensual con todos los nombres"><figcaption>Vista <b>Mes</b>: todo el mes de un vistazo. Un clic en una semana la abre.</figcaption></figure>
+        <figure style="max-width:300px;justify-self:center"><img class="shot" src="ayuda/movil.jpg" alt="La app en el móvil"><figcaption>En el móvil. Se instala como una app y abre sin conexión.</figcaption></figure>
+      </div>
+    </section>
+
+    <section class="card" id="avisos">
+      <h2><span class="num">5</span>Publicar, avisar y sustituir</h2>
+      <ul class="lista">
+        <li><b>Publicar</b> bloquea la semana. A partir de ahí, cambiar a alguien se hace con <b>Sustituir</b>: pide quién entra y el motivo, y queda registrado. El original consta como «sustituido» y no cuenta como parte hecha.</li>
+        <li><b>Avisos</b>: cada asignado tiene un botón de WhatsApp con el mensaje ya escrito, otro para copiarlo y otro 📅 para darle sus fechas en un archivo de calendario. La app marca quién está avisado.</li>
+        <li><b>Calendario</b>: en Imprimir, «📅 Calendario del mes» descarga todas las asignaciones para Google Calendar, Outlook o el iPhone, con recordatorio el día antes y dos horas antes.</li>
+        <li><b>Google Drive</b>: con la cuenta conectada, todo se guarda solo. Si cambias algo en el móvil, el ordenador lo recoge al volver a la app.</li>
+        <li><b>Deshacer</b> (botón o Ctrl+Z) recupera el último cambio.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="estadisticas">
+      <div class="paso inverso">
+        <div class="texto">
+          <h2><span class="num">6</span>Estadísticas</h2>
+          <p>Por periodo (3, 6 o 12 meses, año de servicio o todo):</p>
+          <ul class="lista">
+            <li>Quién participa más y quién menos (estos son buenos candidatos para las próximas semanas).</li>
+            <li>Partes por mes y por tipo de asignación.</li>
+            <li>Mapa de quién hace qué.</li>
+            <li>Reparto entre sala principal y auxiliar.</li>
+            <li>Parejas más repetidas.</li>
+            <li>Sustituciones: por qué motivo, a quién se sustituyó y quién cubrió más.</li>
+          </ul>
+          <p class="muted">Al pasar el ratón por una barra se ve su detalle; un clic sobre una persona abre su historial.</p>
+        </div>
+        <figure><img class="shot recorte" src="ayuda/estadisticas.png" alt="Estadísticas con gráficos de participación"><figcaption>Pestaña Estadísticas.</figcaption></figure>
+      </div>
+    </section>
+
+    <section class="card" id="pdf">
+      <h2><span class="num">7</span>Lo que se imprime (PDF)</h2>
+      <p>En <b>Imprimir</b> eliges el mes (y, si quieres, una semana) y pulsas «🖨 Imprimir / Guardar PDF». El navegador permite guardarlo como PDF para enviarlo. Así salen los tres formatos, con los datos de la demostración:</p>
+      <div class="pdfs">
+        <div class="pdf">
+          <a href="ayuda/ejemplo-programa.pdf" target="_blank" rel="noopener"><img class="shot" src="ayuda/pagina-programa.png" alt="Programa del mes"></a>
+          <b>Programa del mes</b>
+          <span class="muted">Tres semanas por folio. Si hay sala auxiliar, sale en dos columnas. Con los colores de cada sección y la lectura semanal.</span>
+          <a href="ayuda/ejemplo-programa.pdf" target="_blank" rel="noopener">Abrir PDF de ejemplo</a>
+        </div>
+        <div class="pdf">
+          <a href="ayuda/ejemplo-s89.pdf" target="_blank" rel="noopener"><img class="shot" src="ayuda/pagina-s89.png" alt="Hojas de asignación S-89"></a>
+          <b>Hojas de asignación (S-89)</b>
+          <span class="muted">Cuatro por folio, listas para recortar. Llevan nombre, ayudante, fecha, intervención, lección y la sala marcada.</span>
+          <a href="ayuda/ejemplo-s89.pdf" target="_blank" rel="noopener">Abrir PDF de ejemplo</a>
+        </div>
+        <div class="pdf">
+          <a href="ayuda/ejemplo-presidente.pdf" target="_blank" rel="noopener"><img class="shot" src="ayuda/pagina-presidente.png" alt="Hoja del presidente"></a>
+          <b>Hoja del presidente</b>
+          <span class="muted">Hora de comienzo de cada momento (canciones, consejo incluido), minutos, asignados y una columna para apuntar la hora real.</span>
+          <a href="ayuda/ejemplo-presidente.pdf" target="_blank" rel="noopener">Abrir PDF de ejemplo</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="excel">
+      <h2>Formato del Excel para importar el historial</h2>
+      <p>No hace falta adaptar tu Excel: sirven estos dos formatos, y la app deja elegir qué es cada columna. Basta con que haya una fila de encabezados (no tiene que ser la primera) y una fecha por fila.</p>
+
+      <h3>Opción A · Cuadrante: una fila por semana</h3>
+      <div class="tabla"><table class="ej">
+        <tr><th>Fecha</th><th>Presidente</th><th>Oración</th><th>Tesoros</th><th>Perlas</th><th>Lectura</th><th>Lectura aux</th><th>Maestros 1</th><th>Ayudante 1</th><th>Maestros 2</th><th>Discurso</th><th>Vida cristiana</th><th>Conductor EBC</th><th>Lector</th><th>Oración final</th></tr>
+        <tr><td>07/05/2026</td><td>Juan Pérez</td><td>Pablo Mora</td><td>Luis Gómez</td><td>Pedro Ruiz</td><td>Tomás Gil</td><td>Daniel Rey</td><td>Ana Pérez</td><td>Marta Sanz</td><td>Lucía Vega / Rosa Cano</td><td>Sergio Prieto</td><td>Raúl Soto</td><td>Jorge Vidal</td><td>Andrés León</td><td>Marcos Díaz</td></tr>
+      </table></div>
+      <p class="muted">Una celda puede llevar titular y ayudante juntos («Lucía Vega / Rosa Cano»). «aux», «sala B» o «sala 2» en el encabezado indican la sala auxiliar.</p>
+
+      <h3>Opción B · Lista: una fila por asignación</h3>
+      <div class="tabla"><table class="ej">
+        <tr><th>Fecha</th><th>Publicador</th><th>Parte</th><th>Ayudante</th><th>Sala</th><th>Título <span class="muted">(opcional)</span></th></tr>
+        <tr><td>04/06/2026</td><td>Pérez García, Juan</td><td>Presidente</td><td></td><td></td><td></td></tr>
+        <tr><td>04/06/2026</td><td>Lucía Vega</td><td>Empiece conversaciones</td><td>Rosa Cano</td><td>Auxiliar</td><td></td></tr>
+        <tr><td>04/06/2026</td><td>Tomás Gil</td><td>Lectura de la Biblia</td><td></td><td>Principal</td><td>Jer 52:6-20</td></tr>
+      </table></div>
+      <p class="muted">Este es también el formato del botón «⬇ CSV» de la pestaña Historial, así que una exportación se puede volver a importar.</p>
+
+      <h3>Qué entiende en cada parte</h3>
+      <ul class="lista">
+        <li><b>Fechas</b>: celdas de fecha de Excel, «07/05/2026», «2026-05-07» o «7 de mayo de 2026». Sirve cualquier día de la semana de la reunión.</li>
+        <li><b>Partes</b>: presidente, oración (inicial y final), tesoros/discurso, perlas, lectura, demostraciones («empiece conversaciones», «revisitas», «discípulos», «creencias», «maestros»), discurso de estudiante, vida cristiana, estudio/conductor, lector, ayudante y consejero de la sala auxiliar.</li>
+        <li><b>Nombres</b>: se buscan sin importar tildes ni mayúsculas, también como «Apellidos, Nombre» o con un apellido menos.</li>
+      </ul>
+      <div class="nota">Si me pasas vuestro Excel, compruebo con él que se importa bien y, si hace falta, adapto el importador a su formato.</div>
+    </section>
+  </main>
+</body>
+</html>

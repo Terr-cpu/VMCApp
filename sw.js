@@ -1,7 +1,7 @@
 // Permite abrir la app sin conexión. Primero intenta la red (para recibir actualizaciones)
 // y si no hay conexión usa la copia guardada.
-const CACHE = 'vmcapp-v1';
-const ARCHIVOS = ['./', 'index.html', 'style.css', 'app.js', 'guia.js', 'drive.js', 'stats.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'vmcapp-v2';
+const ARCHIVOS = ['./', 'index.html', 'style.css', 'app.js', 'guia.js', 'drive.js', 'stats.js', 'extra.js', 'historial.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting()));

@@ -108,6 +108,7 @@ function parsearSemana(doc, anio) {
   const lectura = limpiar(doc.querySelector('header h2')?.textContent);
 
   const partes = [];
+  const canciones = [];
   let sec = null;
   for (const h of doc.querySelectorAll('h2, h3')) {
     const txt = limpiar(h.textContent);
@@ -117,6 +118,8 @@ function parsearSemana(doc, anio) {
       else if (/VIDA CRISTIANA/i.test(txt)) sec = 'vida';
       continue;
     }
+    const can = h.tagName === 'H3' && !/^\d+\./.test(txt) && txt.match(/Canci[óo]n (\d+)/i);
+    if (can) { canciones.push(can[1]); continue; }
     const n = txt.match(/^(\d+)\.\s*(.+)$/);
     if (!n || !sec) continue;
     const num = Number(n[1]), nombreParte = n[2];
@@ -156,7 +159,7 @@ function parsearSemana(doc, anio) {
     if (parte.tipo) partes.push(parte);
   }
   if (!partes.length) return null;
-  return { lunes, lectura, partes };
+  return { lunes, lectura, partes, canciones: canciones.slice(0, 3) };
 }
 
 // Convierte una semana de la Guía en partes de la app (con sala auxiliar si procede)
@@ -177,7 +180,9 @@ function aplicarSemanaGuia(g) {
   const sem = semanaPorLunes(g.lunes);
   const nuevas = partesDesdeGuia(g, sem ? semTieneAux(sem) : state.config.salas == 2);
   if (!sem) {
-    state.semanas.push({ id: uid(), lunes: g.lunes, lecturaSemanal: g.lectura, estado: 'borrador', sinReunion: false, motivoSinReunion: '', partes: nuevas });
+    const s = { id: uid(), lunes: g.lunes, lecturaSemanal: g.lectura, canciones: g.canciones, estado: 'borrador', sinReunion: false, motivoSinReunion: '', partes: nuevas };
+    aplicarEspecial(s);
+    state.semanas.push(s);
     state.semanas.sort((a, b) => a.lunes.localeCompare(b.lunes));
     return { nueva: true, perdidas: [] };
   }
@@ -191,6 +196,8 @@ function aplicarSemanaGuia(g) {
   const perdidas = sem.partes.filter(p => !usadas.has(p) && (p.titular || p.ayudante));
   sem.partes = nuevas;
   sem.lecturaSemanal = g.lectura;
+  if (g.canciones?.length) sem.canciones = g.canciones;
+  aplicarEspecial(sem);
   return { nueva: false, perdidas };
 }
 

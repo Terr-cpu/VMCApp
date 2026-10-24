@@ -2,7 +2,8 @@
 
 /* ================= Constantes ================= */
 
-const KEY = 'vmcapp:v1';
+const DEMO = new URLSearchParams(location.search).has('demo');
+const KEY = DEMO ? 'vmcapp:demo' : 'vmcapp:v1';
 
 // Tipos de asignación que puede tener un publicador
 const ASIG = {
@@ -50,6 +51,7 @@ const TIPOS = {
   analisis:     { sec: 'maestros', orden: 1, label: 'Análisis con el auditorio', cod: 'vida', titulo: true },
   vida:         { sec: 'vida',     orden: 1, label: 'Parte', cod: 'vida', titulo: true },
   estudio:      { sec: 'vida',     orden: 2, label: 'Estudio bíblico de la congregación', cod: 'estudio_conductor', ayu: 'estudio_lector', ayuLabel: 'Lector', titulo: true },
+  visita_sc:    { sec: 'vida',     orden: 2, label: 'Discurso del superintendente de circuito', fijo: true, titulo: true },
   oracion_fin:  { sec: 'cierre',   orden: 1, label: 'Oración final', cod: 'oracion' },
 };
 const SEC_ORDEN = Object.fromEntries(SECCIONES.map(([k], i) => [k, i]));
@@ -102,8 +104,9 @@ function relativo(dias) {
 function estadoVacio() {
   return {
     version: 1,
-    config: { congregacion: '', diaReunion: 4, salas: 1, partesMaestros: 3, partesVida: 1, prefijo: '34', minSemanas: 2 },
+    config: { congregacion: '', diaReunion: 4, salas: 1, partesMaestros: 3, partesVida: 1, prefijo: '34', minSemanas: 2, horaReunion: '19:00' },
     publicadores: [],
+    especiales: [],
     semanas: [],
     sustituciones: [],
     ultimoRespaldo: null,
@@ -171,7 +174,7 @@ const pub = id => state.publicadores.find(p => p.id === id);
 const nombre = id => id ? (pub(id)?.nombre ?? '(eliminado)') : '';
 const semanaPorLunes = l => state.semanas.find(s => s.lunes === l);
 const semanaPorId = id => state.semanas.find(s => s.id === id);
-const fechaReunionDeLunes = l => addDias(l, (state.config.diaReunion + 6) % 7);
+const fechaReunionDeLunes = l => addDias(l, (diaReunionDe(l) + 6) % 7);
 const fechaReunion = s => fechaReunionDeLunes(s.lunes);
 const publicadoresOrdenados = () => [...state.publicadores].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 
@@ -329,7 +332,7 @@ function sugerirVacios(sem) {
     let mejor = null;
     for (const parte of sem.partes) {
       for (const rol of ['titular', 'ayudante']) {
-        if (parte[rol] || (rol === 'ayudante' && (!TIPOS[parte.tipo].ayu || !parte.titular))) continue;
+        if (TIPOS[parte.tipo].fijo || parte[rol] || (rol === 'ayudante' && (!TIPOS[parte.tipo].ayu || !parte.titular))) continue;
         const aptos = candidatos(sem, parte, rol, ents).filter(c => !c.motivos.length);
         if (aptos.length && (!mejor || aptos.length < mejor.k)) mejor = { parte, rol, c: aptos[0], k: aptos.length };
       }
@@ -374,7 +377,7 @@ function abrirCandidatos(sem, parte, rol) {
 }
 
 const semanasDesde = (lunes, n) => state.semanas.filter(s => s.lunes >= lunes && s.lunes < addDias(lunes, 7 * n));
-const huecos = sem => sem.sinReunion ? 0 : sem.partes.reduce((n, p) => n + (p.titular ? 0 : 1) + (TIPOS[p.tipo].ayu && !p.ayudante ? 1 : 0), 0);
+const huecos = sem => sem.sinReunion ? 0 : sem.partes.reduce((n, p) => n + (TIPOS[p.tipo].fijo ? 0 : (p.titular ? 0 : 1) + (TIPOS[p.tipo].ayu && !p.ayudante ? 1 : 0)), 0);
 
 function abrirRellenar() {
   const desde = ui.lunes;
@@ -490,6 +493,7 @@ function crearSemana(lunes, modo) {
     partes = prev ? prev.partes.map(p => nuevaParte(p.tipo, p.sala, ['maestros', 'discurso_est'].includes(p.tipo) ? p.titulo : '')) : plantilla();
   } else partes = plantilla();
   const sem = { id: uid(), lunes, lecturaSemanal: '', estado: 'borrador', sinReunion: false, motivoSinReunion: '', partes };
+  aplicarEspecial(sem);
   state.semanas.push(sem);
   state.semanas.sort((a, b) => a.lunes.localeCompare(b.lunes));
   return sem;
@@ -511,6 +515,11 @@ function render() {
 
 function renderAviso() {
   const el = $('#aviso');
+  if (DEMO) {
+    el.hidden = false;
+    el.innerHTML = `<b>Modo demostración:</b> datos inventados que no se guardan en Drive ni se mezclan con los tuyos. <a href="./">Volver a mi cuadrante</a>`;
+    return;
+  }
   const hayDatos = state.publicadores.length || state.semanas.length;
   const dias = state.ultimoRespaldo ? diasEntre(state.ultimoRespaldo.slice(0, 10), hoyISO()) : null;
   if (hayDatos && !drive.conectado && (dias == null || dias > 14)) {
@@ -556,6 +565,7 @@ function vistaCuadrante() {
         <button data-act="crear-sem" data-modo="plantilla">Crear con plantilla</button>
         ${hayPrev ? `<button data-act="crear-sem" data-modo="copiar">Copiar estructura de la semana anterior</button>` : ''}
       </div>
+      <div class="row" style="justify-content:center;margin-top:12px">${selectorEspecial(ui.lunes)}</div>
       <p class="small">Plantilla: ${state.config.partesMaestros} partes de «Seamos mejores maestros», ${state.config.partesVida} de «Nuestra vida cristiana»${state.config.salas == 2 ? ', con sala auxiliar' : ''} (cámbialo en Ajustes). La sala auxiliar también se puede activar en cada semana.</p>
     </div>`;
     return html;
@@ -585,6 +595,11 @@ function vistaCuadrante() {
       ${sem.sinReunion ? '' : `<label class="row" style="margin-top:18px" title="Añade o quita las partes de estudiante de la sala auxiliar en esta semana"><input type="checkbox" data-act="sala-aux" ${semTieneAux(sem) ? 'checked' : ''} ${publicada ? 'disabled' : ''}> Sala auxiliar</label>`}
       <label class="row" style="margin-top:18px"><input type="checkbox" data-act="sin-reunion" ${sem.sinReunion ? 'checked' : ''}> Sin reunión</label>
       ${sem.sinReunion ? `<label class="field grow"><span>Motivo</span><input data-act="motivo-sin" value="${esc(sem.motivoSinReunion)}" placeholder="Asamblea, visita del superintendente…"></label>` : ''}
+    </div>
+    <div class="row" style="margin-top:10px;align-items:flex-end">
+      ${selectorEspecial(sem.lunes)}
+      ${sem.sinReunion ? '' : `<div class="field"><span>Canciones (inicio · medio · final)</span><div class="row canciones">
+        ${[0, 1, 2].map(i => `<input data-act="cancion" data-i="${i}" inputmode="numeric" value="${esc((sem.canciones || [])[i] || '')}" placeholder="${['Inicio', 'Medio', 'Final'][i]}">`).join('')}</div></div>`}
     </div>
     ${publicada ? `<p class="small muted" style="margin:10px 0 0">La semana está publicada: los cambios de personas se registran como <b>sustituciones</b> en el historial.</p>` : ''}
     ${problemas.length ? `<div class="problemas">${problemas.map(x => `<div>⚠ ${esc(x)}</div>`).join('')}</div>` : ''}
@@ -628,7 +643,7 @@ function filaParte(sem, p, publicada, ents) {
     if (t.ayu) slots.push(slot(sem, x, 'ayudante', t.ayuLabel, publicada, ents));
     return slots.join('');
   };
-  const cuerpo = gem
+  const cuerpo = t.fijo ? `<div class="slot"><div class="fijo vacio">Lo presenta el superintendente de circuito</div></div>` : gem
     ? `<div class="sala-blk"><span class="sala-tag">Sala principal</span>${bloque(p)}</div><div class="sala-blk aux"><span class="sala-tag">Sala auxiliar</span>${bloque(gem)}</div>`
     : bloque(p);
   return `<div class="parte">
@@ -719,6 +734,7 @@ function vistaMes() {
     const p = celdas.get(`${s.id}|${clave}`);
     if (s.sinReunion) return '<td class="muted small">—</td>';
     if (!p) return '<td></td>';
+    if (TIPOS[p.tipo].fijo) return `<td class="small muted">Superintendente</td>`;
     const t = TIPOS[p.tipo];
     const nombres = [p.titular ? esc(nombre(p.titular)) : '<span class="hueco">libre</span>'];
     if (t.ayu) nombres.push(p.ayudante ? esc(nombre(p.ayudante)) : '<span class="hueco">libre</span>');
@@ -786,6 +802,7 @@ function tarjetaAvisos(sem) {
         <td class="row" style="justify-content:flex-end">
           <a class="btn small" href="${url}" target="_blank" rel="noopener" data-act="aviso-wa" data-parte="${a.parte.id}" data-rol="${a.rol}">WhatsApp</a>
           <button class="small" data-act="aviso-copiar" data-parte="${a.parte.id}" data-rol="${a.rol}">Copiar</button>
+          <button class="small icon" data-act="ics-pub" data-id="${a.id}" title="Descargar sus próximas asignaciones para el calendario (.ics)">📅</button>
           ${av ? `<button class="small icon" data-act="aviso-quitar" data-parte="${a.parte.id}" data-rol="${a.rol}" title="Marcar como pendiente">↺</button>` : ''}
         </td></tr>`;
     }).join('')}</tbody></table></div></div>`;
@@ -961,7 +978,7 @@ function abrirPublicador(id) {
     </div>
     ${nuevo ? '' : resumenPublicador(p.id)}
     <div class="dlg-foot">
-      <span>${nuevo ? '' : `<button class="danger" data-dlg="borrar">Eliminar</button> <button data-dlg="ver-hist">Ver historial</button>`}</span>
+      <span>${nuevo ? '' : `<button class="danger" data-dlg="borrar">Eliminar</button> <button data-dlg="ver-hist">Ver historial</button> <button data-dlg="ics" title="Sus próximas asignaciones en un archivo para el calendario">📅 Calendario</button>`}</span>
       <span class="row"><button data-dlg="cerrar">Cancelar</button><button class="primary" data-dlg="ok">Guardar</button></span>
     </div>`;
   };
@@ -1000,6 +1017,7 @@ function abrirPublicador(id) {
       }
       cerrarDialogo(); commit();
     }
+    else if (accion === 'ics') icsPublicador(p.id);
     else if (accion === 'ver-hist') {
       cerrarDialogo(); ui.vista = 'historial'; ui.hist = 'detalle'; ui.filtro = { pub: p.id, cod: '', desde: '', hasta: '' }; render();
     }
@@ -1044,7 +1062,8 @@ function badgeEstado(e) {
 
 function vistaHistorial() {
   const tabs = [['resumen', 'Resumen por publicador'], ['detalle', 'Detalle'], ['sustituciones', `Sustituciones (${state.sustituciones.length})`]];
-  let html = `<div class="subtabs">${tabs.map(([k, v]) => `<button data-act="hist-tab" data-tab="${k}" class="${ui.hist === k ? 'on' : ''}">${v}</button>`).join('')}</div>`;
+  let html = `<div class="row between" style="margin-bottom:12px"><div class="subtabs" style="margin:0">${tabs.map(([k, v]) => `<button data-act="hist-tab" data-tab="${k}" class="${ui.hist === k ? 'on' : ''}">${v}</button>`).join('')}</div>
+    <button data-act="importar-hist">📄 Importar historial (Excel / CSV)</button></div>`;
   if (ui.hist === 'resumen') html += histResumen();
   else if (ui.hist === 'detalle') html += histDetalle();
   else html += state.sustituciones.length ? `<div class="card">${tablaSustituciones(state.sustituciones)}</div>` : `<div class="card empty">No hay sustituciones registradas.</div>`;
@@ -1144,9 +1163,10 @@ const PARTES_ESTUDIANTE = ['lectura', 'maestros', 'discurso_est'];
 function vistaImprimir() {
   const sems = state.semanas.filter(s => fechaReunion(s).slice(0, 7) === ui.mesImprimir);
   const tabs = `<div class="subtabs no-print">
-    <button data-act="impr-tab" data-tab="programa" class="${ui.impr !== 's89' ? 'on' : ''}">Programa del mes</button>
-    <button data-act="impr-tab" data-tab="s89" class="${ui.impr === 's89' ? 'on' : ''}">Hojas de asignación (S-89)</button></div>`;
-  return tabs + (ui.impr === 's89' ? imprS89(sems) : imprPrograma(sems));
+    <button data-act="impr-tab" data-tab="programa" class="${!['s89', 'presidente'].includes(ui.impr) ? 'on' : ''}">Programa del mes</button>
+    <button data-act="impr-tab" data-tab="s89" class="${ui.impr === 's89' ? 'on' : ''}">Hojas de asignación (S-89)</button>
+    <button data-act="impr-tab" data-tab="presidente" class="${ui.impr === 'presidente' ? 'on' : ''}">Hoja del presidente</button></div>`;
+  return tabs + (ui.impr === 's89' ? imprS89(sems) : ui.impr === 'presidente' ? imprPresidente(sems) : imprPrograma(sems));
 }
 
 function imprS89(sems) {
@@ -1180,7 +1200,7 @@ function hojaS89(s, p) {
     <div class="linea"><b>Ayudante:</b> <span>${t.ayu ? esc(nombre(p.ayudante)) : ''}</span></div>
     <div class="linea"><b>Fecha:</b> <span>${fechaLarga(fechaReunion(s))}</span></div>
     <div class="linea"><b>Intervención núm.:</b> <span>${p.num ? p.num + ' · ' : ''}${p.tipo === 'lectura' ? t.label + (p.titulo ? ` (${esc(p.titulo)})` : '') : esc(p.titulo || t.label)}</span></div>
-    ${p.leccion ? `<div class="linea"><b>Lección:</b> <span>${esc(p.leccion)}</span></div>` : ''}
+    ${p.leccion ? `<div class="linea"><b>Lección:</b> <span>${esc(p.leccion.replace(/^lecci[óo]n\s*/i, ''))}</span></div>` : ''}
     <div class="salas"><b>Se presentará en:</b>
       <div>${caja(!dos || p.sala !== 'B')} Sala principal</div>
       <div>${caja(dos && p.sala === 'B')} Sala auxiliar núm. 1</div>
@@ -1203,6 +1223,7 @@ function imprPrograma(sems) {
     if (s.sinReunion) return `<div class="p-sem">${cab}<p><i>${esc(s.motivoSinReunion || 'Sin reunión')}</i></p></div>`;
     const nombresDe = p => {
       const t = TIPOS[p.tipo];
+      if (t.fijo) return 'Superintendente de circuito';
       if (p.tipo === 'estudio' && p.ayudante) return `${esc(nombre(p.titular))} / Lector: ${esc(nombre(p.ayudante))}`;
       return [nombre(p.titular), t.ayu ? nombre(p.ayudante) : ''].filter(Boolean).map(esc).join(' / ') || '—';
     };
@@ -1227,6 +1248,7 @@ function imprPrograma(sems) {
   return `<div class="card row no-print">
     <label class="row">Mes <input type="month" data-act="mes-imprimir" value="${mes}"></label>
     <button class="primary" data-act="imprimir" ${sems.length ? '' : 'disabled'}>🖨 Imprimir / Guardar PDF</button>
+    <button data-act="ics-mes" ${sems.length ? '' : 'disabled'} title="Todas las asignaciones del mes en un archivo para Google Calendar, Outlook o el iPhone">📅 Calendario del mes (.ics)</button>
     <span class="muted small">${sems.length} semanas · ${sems.filter(s => s.estado !== 'publicada' && !s.sinReunion).length} en borrador</span>
   </div>
   ${sems.length ? `<div class="hoja">
@@ -1249,6 +1271,7 @@ function vistaAjustes() {
       <label class="field"><span>Salas</span><select data-act="cfg" data-k="salas" data-num="1">
         <option value="1" ${c.salas == 1 ? 'selected' : ''}>Solo sala principal</option>
         <option value="2" ${c.salas == 2 ? 'selected' : ''}>Principal + auxiliar (por defecto en semanas nuevas)</option></select></label>
+      <label class="field"><span>Hora de comienzo de la reunión</span><input type="time" data-act="cfg" data-k="horaReunion" value="${c.horaReunion || '19:00'}"></label>
       <label class="field"><span>Prefijo telefónico del país (WhatsApp)</span><input data-act="cfg" data-k="prefijo" value="${esc(c.prefijo)}" placeholder="34"></label>
       <label class="field"><span>Semanas mínimas entre partes de una misma persona</span><input type="number" min="0" max="12" data-act="cfg" data-k="minSemanas" data-num="1" value="${c.minSemanas ?? 2}"></label>
       <label class="field"><span>Partes de «Seamos mejores maestros» por defecto</span><input type="number" min="1" max="6" data-act="cfg" data-k="partesMaestros" data-num="1" value="${c.partesMaestros}"></label>
@@ -1256,7 +1279,18 @@ function vistaAjustes() {
     </div>
     <p class="small muted">La plantilla solo afecta a las semanas que crees a partir de ahora.</p>
   </div>
-  ${tarjetaDrive()}
+  ${tarjetaEspeciales()}
+  ${DEMO ? '' : tarjetaDrive()}
+  <div class="card">
+    <h2>Historial anterior</h2>
+    <p class="small muted" style="margin-top:0">Si llevabas las asignaciones en Excel o en otra aplicación, impórtalas para que las sugerencias tengan en cuenta quién hizo qué.</p>
+    <button data-act="importar-hist">📄 Importar historial (Excel / CSV)</button>
+  </div>
+  <div class="card">
+    <h2>Demostración</h2>
+    <p class="small muted" style="margin-top:0">Abre la app con una congregación inventada para probarlo todo sin tocar tus datos.</p>
+    ${DEMO ? `<div class="row"><a class="btn primary" href="./">Salir de la demostración</a><button data-act="demo-reiniciar">Reiniciar datos de ejemplo</button></div>` : `<a class="btn" href="./?demo=1" target="_blank" rel="noopener">▶ Abrir demostración</a> <a class="btn" href="ayuda.html" target="_blank" rel="noopener">📘 Guía de uso</a>`}
+  </div>
   <div class="card">
     <h2>Copia de seguridad</h2>
     <p class="small muted" style="margin-top:0">Los datos se guardan en este navegador. Descarga una copia con regularidad (por ejemplo en esta misma carpeta o en Drive) para no perder el historial.</p>
@@ -1354,6 +1388,19 @@ document.addEventListener('click', e => {
     case 'sem-hoy': ui.lunes = lunesDe(hoyISO()); render(); break;
     case 'importar-guia': abrirImportarGuia(); break;
     case 'rellenar': abrirRellenar(); break;
+    case 'importar-hist': abrirImportarHistorial(); break;
+    case 'ics-pub': icsPublicador(el.dataset.id); break;
+    case 'ics-mes': icsMes(ui.mesImprimir); break;
+    case 'esp-quitar': ponerEspecial(el.dataset.lunes, null); commit(); break;
+    case 'esp-add': {
+      const f = $('#esp-fecha').value;
+      if (!f) { alert('Elige una fecha de esa semana.'); break; }
+      if (ponerEspecial(lunesDe(f), $('#esp-tipo').value, { nota: $('#esp-nota').value.trim() })) commit();
+      break;
+    }
+    case 'demo-reiniciar':
+      if (confirm('¿Volver a generar los datos de ejemplo?')) { generarDemo(); reiniciarDeshacer(); guardarLocal(); render(); }
+      break;
     case 'est-periodo': ui.estPeriodo = el.dataset.k; render(); break;
     case 'candidatos': abrirCandidatos(sem, parte, el.dataset.rol); break;
     case 'deshacer': deshacer(); break;
@@ -1465,6 +1512,15 @@ document.addEventListener('change', e => {
       ponerSalaAux(sem, el.checked); commit(); break;
     }
     case 'lectura-semanal': sem.lecturaSemanal = el.value; guardar(); break;
+    case 'cancion': sem.canciones = Object.assign(['', '', ''], sem.canciones || []); sem.canciones[Number(el.dataset.i)] = el.value.trim(); guardar(); break;
+    case 'especial':
+      if (!ponerEspecial(el.dataset.lunes, el.value || null)) { render(); break; }
+      commit(); break;
+    case 'especial-dia': {
+      const e = especialDe(el.dataset.lunes);
+      if (e) { e.dia = Number(el.value); commit(); }
+      break;
+    }
     case 'sin-reunion': sem.sinReunion = el.checked; commit(); break;
     case 'motivo-sin': sem.motivoSinReunion = el.value; guardar(); break;
     case 'ver-inactivos': ui.verInactivos = el.checked; render(); break;
@@ -1486,4 +1542,7 @@ document.addEventListener('input', e => {
   }
 });
 
+if (DEMO && !state.publicadores.length) { generarDemo(); reiniciarDeshacer(); guardarLocal(); }
+aplicarRuta();
+window.addEventListener('hashchange', () => { aplicarRuta(); render(); });
 render();

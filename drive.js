@@ -66,7 +66,7 @@ function setSync(estado, error = '') {
 function pintarSync() {
   const b = $('#sync');
   if (!b) return;
-  if (!drive.conectado) { b.hidden = true; return; }
+  if (!drive.conectado || DEMO) { b.hidden = true; return; }
   b.hidden = false;
   b.className = 'sync';
   if (sync.ocupado) b.textContent = '☁ Sincronizando…';
@@ -78,7 +78,7 @@ function pintarSync() {
 
 // Se llama tras cada cambio: sube a Drive pasados unos segundos
 function programarSubida() {
-  if (!drive.conectado) return;
+  if (!drive.conectado || DEMO) return;
   clearTimeout(sync.timer);
   pintarSync();
   if (!tokenValido()) return;
@@ -90,6 +90,15 @@ function manejarError(e) {
   if (e.message === 'sesion') setSync('', '');
   else setSync('', e.message);
 }
+
+// Al volver a la app (o cada 2 minutos con ella abierta) trae los cambios hechos desde otro dispositivo
+function comprobarRemoto() {
+  if (DEMO || !drive.conectado || !tokenValido() || sync.ocupado || document.hidden) return;
+  sincronizar().catch(manejarError);
+}
+document.addEventListener('visibilitychange', comprobarRemoto);
+window.addEventListener('focus', comprobarRemoto);
+setInterval(comprobarRemoto, 120000);
 
 async function conectarDrive() {
   if (!driveDisponible()) { alert('Google Drive solo funciona con la app publicada en https (GitHub Pages) o en localhost, no abriendo el archivo directamente.'); return; }
