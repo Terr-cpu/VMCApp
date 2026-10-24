@@ -150,6 +150,7 @@ function guardarLocal() {
   catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 function guardar() {
+  marcarGuardado();
   const ahora = instantanea();
   if (ahora !== ultimaInstantanea) {
     pilaDeshacer.push(ultimaInstantanea);
@@ -161,6 +162,27 @@ function guardar() {
   programarSubida();
 }
 function commit() { guardar(); render(); }
+
+// «✓ Guardado» en la barra superior, para ver que cada cambio queda guardado
+let tGuardado = null;
+function marcarGuardado() {
+  const el = document.getElementById('guardado');
+  if (!el) return;
+  const h = new Date();
+  el.textContent = `✓ Guardado ${pad(h.getHours())}:${pad(h.getMinutes())}`;
+  el.classList.add('vivo');
+  clearTimeout(tGuardado);
+  tGuardado = setTimeout(() => el.classList.remove('vivo'), 1500);
+}
+
+function aviso(msg) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.add('ver');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('ver'), 2600);
+}
 function deshacer() {
   if (!pilaDeshacer.length) return;
   state = normalizar(JSON.parse(pilaDeshacer.pop()));
@@ -537,6 +559,7 @@ function render() {
   bd.hidden = !pilaDeshacer.length;
   main.innerHTML = vistas[ui.vista]();
   ajustarPapel();
+  anotarRuta();
 }
 
 // En pantallas estrechas la vista previa se reduce entera, como una hoja de papel
@@ -1232,19 +1255,32 @@ function abrirPublicador(id) {
     }
     else if (accion === 'ok') {
       if (!p.nombre) { alert('Escribe el nombre.'); return; }
-      if (p.sexo === 'M') {
-        p.asignaciones = p.asignaciones.filter(c => !SOLO_VARONES.includes(c));
-        if (['anciano', 'siervo'].includes(p.privilegio)) p.privilegio = 'publicador';
-      }
-      if (p.soloAyudante) p.asignaciones = ['ayudante'];
-      p.ausencias = p.ausencias.filter(a => a.desde);
-      if (nuevo) state.publicadores.push(p);
-      else state.publicadores[state.publicadores.findIndex(x => x.id === p.id)] = p;
+      guardarFicha();
       cerrarDialogo(); commit();
     }
     else if (accion === 'cerrar') cerrarDialogo();
   };
+  const guardarFicha = () => {
+    if (p.sexo === 'M') {
+      p.asignaciones = p.asignaciones.filter(c => !SOLO_VARONES.includes(c));
+      if (['anciano', 'siervo'].includes(p.privilegio)) p.privilegio = 'publicador';
+    }
+    if (p.soloAyudante) p.asignaciones = ['ayudante'];
+    p.ausencias = p.ausencias.filter(a => a.desde);
+    const i = state.publicadores.findIndex(x => x.id === p.id);
+    if (i < 0) state.publicadores.push(structuredClone(p));
+    else state.publicadores[i] = structuredClone(p);
+  };
   pintar();
+  const inicial = JSON.stringify(p);
+  // Si se cierra sin pulsar Guardar (Atrás, Esc o al salir de la app), no se pierde lo escrito
+  alCerrarFuera = () => {
+    if (!$('#f-nombre')) return;
+    leer();
+    if (JSON.stringify(p) === inicial || !p.nombre) return;
+    guardarFicha(); guardar();
+    aviso(`Cambios de ${p.nombre} guardados`);
+  };
   $('#dlg').showModal();
   // Al cambiar sexo/privilegio/solo ayudante repinta (limita opciones)
   $('#dlg-body').onchange = e => {
@@ -1546,6 +1582,20 @@ function importar(file) {
 /* ================= Diálogo ================= */
 
 let dlgHandler = null;
+let alCerrarFuera = null;
+let ignorarPop = false;
+{
+  // Al cerrar una ventana (botón, Esc o «Atrás») se limpia y, si hacía falta, se guarda lo escrito
+  const dlg = $('#dlg');
+  dlg.addEventListener('cancel', () => { alCerrarFuera?.(); });
+  dlg.addEventListener('close', () => {
+    dlg.classList.remove('hoja-abajo');
+    $('#dlg-body').oninput = null;
+    dlgHandler = null;
+    alCerrarFuera = null;
+    render();
+  });
+}
 function abrirDialogo(html, onOk) {
   $('#dlg-body').innerHTML = html;
   $('#dlg-body').onchange = null;
@@ -1557,11 +1607,55 @@ function abrirDialogo(html, onOk) {
   $('#dlg').showModal();
 }
 function cerrarDialogo() {
-  $('#dlg').close();
-  $('#dlg').classList.remove('hoja-abajo');
-  $('#dlg-body').oninput = null;
-  dlgHandler = null;
+  alCerrarFuera = null;
+  if ($('#dlg').open) $('#dlg').close();
 }
+
+// Pantalla actual como dirección, para que «Atrás» y «Adelante» se muevan dentro de la app
+function rutaActual() {
+  if (ui.vista === 'cuadrante') return ui.modo === 'mes' ? `cuadrante/mes/${ui.mes}` : `cuadrante/${ui.lunes}`;
+  if (ui.vista === 'imprimir') return `imprimir/${ui.impr || 'programa'}/${ui.mesImprimir}`;
+  if (ui.vista === 'historial') return `historial/${ui.hist}`;
+  if (ui.vista === 'estadisticas') return `estadisticas/${ui.estPeriodo}`;
+  return ui.vista;
+}
+let restaurando = false;
+function anotarRuta() {
+  if (restaurando || $('#dlg').open) return;
+  const ruta = rutaActual();
+  if (history.state?.ruta === ruta) return;
+  const url = location.pathname + location.search + '#' + ruta;
+  if (history.state?.ruta) history.pushState({ ruta }, '', url);
+  else history.replaceState({ ruta }, '', url);
+}
+window.addEventListener('popstate', () => {
+  if (ignorarPop) { ignorarPop = false; return; }
+  const dlg = $('#dlg');
+  if (dlg.open) {
+    // «Atrás» con una ventana abierta: se guarda lo escrito, se cierra y se sigue en la misma pantalla
+    alCerrarFuera?.();
+    alCerrarFuera = null;
+    dlg.close();
+    history.pushState({ ruta: rutaActual() }, '', location.pathname + location.search + '#' + rutaActual());
+    return;
+  }
+  restaurando = true;
+  aplicarRuta();
+  render();
+  restaurando = false;
+  if (history.state?.ruta !== rutaActual()) history.replaceState({ ruta: rutaActual() }, '', location.pathname + location.search + '#' + rutaActual());
+});
+
+// Antes de salir o de pasar a otra app: guarda lo que se esté escribiendo y lo sube a Drive
+function volcarPendiente() {
+  const el = document.activeElement;
+  if (el?.dataset?.act && /^(INPUT|TEXTAREA)$/.test(el.tagName)) el.dispatchEvent(new Event('change', { bubbles: true }));
+  if ($('#dlg').open) alCerrarFuera?.();
+  guardarLocal();
+  if (typeof drive !== 'undefined' && drive.conectado && !DEMO && tokenValido() && hayCambiosLocales()) sincronizar().catch(() => { });
+}
+window.addEventListener('pagehide', volcarPendiente);
+document.addEventListener('visibilitychange', () => { if (document.hidden) volcarPendiente(); });
 $('#dlg').addEventListener('click', e => {
   const b = e.target.closest('[data-dlg]');
   if (b && dlgHandler) { e.preventDefault(); dlgHandler(b.dataset.dlg, b); }
@@ -1574,7 +1668,8 @@ $('#sync').addEventListener('click', () => {
   else conectarDrive();
 });
 window.addEventListener('beforeunload', e => {
-  if (drive.conectado && hayCambiosLocales() && tokenValido()) { sincronizar().catch(() => { }); e.preventDefault(); }
+  volcarPendiente();
+  if (drive.conectado && !DEMO && hayCambiosLocales() && tokenValido()) e.preventDefault();
 });
 
 document.addEventListener('keydown', e => {
@@ -1760,7 +1855,14 @@ document.addEventListener('change', e => {
   }
 });
 
+let tEscritura = null;
 document.addEventListener('input', e => {
+  const el = e.target;
+  if (['titulo', 'lectura-semanal', 'cancion', 'motivo-sin'].includes(el.dataset.act) && !el.closest('dialog')) {
+    clearTimeout(tEscritura);
+    tEscritura = setTimeout(() => el.dispatchEvent(new Event('change', { bubbles: true })), 500);
+    return;
+  }
   if (e.target.dataset.act === 'buscar') {
     ui.buscar = e.target.value;
     render();
@@ -1771,5 +1873,4 @@ document.addEventListener('input', e => {
 
 if (DEMO && !state.publicadores.length) { generarDemo(); reiniciarDeshacer(); guardarLocal(); }
 aplicarRuta();
-window.addEventListener('hashchange', () => { aplicarRuta(); render(); });
 render();

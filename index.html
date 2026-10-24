@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
   <header class="topbar no-print">
@@ -24,18 +24,19 @@
       <button data-vista="imprimir">Imprimir</button>
       <button data-vista="ajustes">Ajustes</button>
     </nav>
+    <span id="guardado" class="guardado" title="Todo se guarda automáticamente en este dispositivo"></span>
     <button id="deshacer" class="deshacer" data-act="deshacer" hidden title="Deshacer el último cambio (Ctrl+Z)">↶ Deshacer</button>
     <button id="sync" class="sync" hidden></button>
   </header>
   <div id="aviso" class="aviso no-print" hidden></div>
   <main id="main"></main>
   <dialog id="dlg"><div id="dlg-body"></div></dialog>
-  <script src="guia.js?v=21"></script>
-  <script src="drive.js?v=21"></script>
-  <script src="stats.js?v=21"></script>
-  <script src="extra.js?v=21"></script>
-  <script src="historial.js?v=21"></script>
-  <script src="app.js?v=21"></script>
+  <script src="guia.js?v=23"></script>
+  <script src="drive.js?v=23"></script>
+  <script src="stats.js?v=23"></script>
+  <script src="extra.js?v=23"></script>
+  <script src="historial.js?v=23"></script>
+  <script src="app.js?v=23"></script>
   <script>
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       navigator.serviceWorker.register('sw.js').catch(() => { });

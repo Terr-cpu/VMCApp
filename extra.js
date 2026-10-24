@@ -300,4 +300,6 @@ function aplicarRuta() {
   if (vista === 'cuadrante' && a === 'mes') { ui.modo = 'mes'; if (b) ui.mes = b; }
   else if (vista === 'cuadrante' && /^\d{4}-\d{2}-\d{2}$/.test(a || '')) ui.lunes = lunesDe(a);
   if (vista === 'estadisticas' && a) ui.estPeriodo = a;
+  if (vista === 'historial' && a) ui.hist = a;
+  if (vista === 'cuadrante' && !a) ui.modo = 'semana';
 }
