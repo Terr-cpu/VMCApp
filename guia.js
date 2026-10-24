@@ -154,6 +154,7 @@ function parsearSemana(doc, anio) {
       }
     } else if (sec === 'vida') {
       if (/estudio b[íi]blico de la congregaci[óo]n/i.test(nombreParte)) { parte.tipo = 'estudio'; parte.titulo = resto.replace(/\.$/, ''); }
+      else if (/necesidades de la congregaci/i.test(nombreParte)) parte.tipo = 'necesidades';
       else parte.tipo = 'vida';
     }
     if (parte.tipo) partes.push(parte);

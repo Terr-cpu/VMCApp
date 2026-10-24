@@ -123,7 +123,8 @@ function parteDesdeTexto(txt) {
   if (/discurso/.test(n)) return r('discurso_est');
   if (/analisis|que diria/.test(n)) return r('analisis');
   if (/empiece|empecemos|revisita|discipulo|creencia|demostraci|maestros|conversaci|estudiante|asignacion/.test(n)) return r('maestros');
-  if (/vida|necesidades|parte/.test(n)) return r('vida');
+  if (/necesidades/.test(n)) return r('necesidades');
+  if (/vida|parte/.test(n)) return r('vida');
   return null;
 }
 
@@ -187,6 +188,7 @@ function interpretar(hoja, cfg) {
         // El papel dice si es estudiante o ayudante; la parte, cuál (lectura, discurso, ¿qué diría?…)
         const pr = parteDesdeTexto(f[col.rol]);
         if (pr && pr.tipo === 'maestros' && pt && ['maestros', 'discurso_est', 'analisis', 'lectura'].includes(pt.tipo)) pt = { ...pt, rol: pr.rol };
+        else if (pr && pr.tipo === 'vida' && pt?.tipo === 'necesidades') { /* la parte concreta manda */ }
         else if (pr) pt = pr;
       }
       if (!pt) { avisos.add(`Parte no reconocida: «${f[col.parte]}»`); continue; }
@@ -250,7 +252,8 @@ function codsDesdeCabecera(h, sexo) {
   if (/que diria|analisis/.test(n)) return ['analisis'];
   if (/conductor/.test(n)) return ['estudio_conductor'];
   if (/lector/.test(n)) return ['estudio_lector'];
-  if (/vida|necesidades/.test(n)) return ['vida'];
+  if (/necesidades/.test(n)) return ['necesidades'];
+  if (/vida/.test(n)) return ['vida'];
   if (/ayudante/.test(n)) return ['ayudante'];
   if (/lectura/.test(n)) return ['lectura'];
   if (/discurso/.test(n)) return ['discurso_est'];

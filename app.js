@@ -17,12 +17,16 @@ const ASIG = {
   ayudante: 'Ayudante',
   discurso_est: 'Discurso de estudiante',
   vida: 'Nuestra vida cristiana',
+  necesidades: 'Necesidades de la congregación',
   estudio_conductor: 'Conductor del estudio',
   estudio_lector: 'Lector del estudio',
   analisis: '¿Qué dirías? (análisis)',
 };
 const SOLO_VARONES = ['presidente', 'consejero_b', 'oracion', 'tesoros', 'perlas', 'lectura',
-  'discurso_est', 'vida', 'estudio_conductor', 'estudio_lector', 'analisis'];
+  'discurso_est', 'vida', 'necesidades', 'estudio_conductor', 'estudio_lector', 'analisis'];
+// Asignaciones que solo puede hacer un anciano
+const SOLO_ANCIANOS = ['necesidades'];
+const esNecesidades = titulo => /necesidades de la congregaci/i.test(titulo || '');
 
 const PRIVILEGIOS = {
   anciano: 'Anciano',
@@ -51,6 +55,7 @@ const TIPOS = {
   discurso_est: { sec: 'maestros', orden: 1, label: 'Discurso', cod: 'discurso_est', salas: true, titulo: true },
   analisis:     { sec: 'maestros', orden: 1, label: '¿Qué dirías?', cod: 'analisis', salas: true, titulo: true },
   vida:         { sec: 'vida',     orden: 1, label: 'Parte', cod: 'vida', titulo: true },
+  necesidades:  { sec: 'vida',     orden: 1, label: 'Necesidades de la congregación', cod: 'necesidades', titulo: true },
   estudio:      { sec: 'vida',     orden: 2, label: 'Estudio bíblico de la congregación', cod: 'estudio_conductor', ayu: 'estudio_lector', ayuLabel: 'Lector', titulo: true },
   visita_sc:    { sec: 'vida',     orden: 2, label: 'Discurso del superintendente de circuito', fijo: true, titulo: true },
   oracion_fin:  { sec: 'cierre',   orden: 1, label: 'Oración final', cod: 'oracion' },
@@ -115,7 +120,25 @@ function estadoVacio() {
 }
 function normalizar(s) {
   const base = estadoVacio();
-  return { ...base, ...s, config: { ...base.config, ...(s.config || {}) } };
+  const st = { ...base, ...s, config: { ...base.config, ...(s.config || {}) } };
+  migrarNecesidades(st);
+  return st;
+}
+
+// «Necesidades de la congregación» pasó a ser una asignación propia, solo para ancianos
+function migrarNecesidades(st) {
+  for (const sem of st.semanas || []) {
+    for (const p of sem.partes || []) if (p.tipo === 'vida' && esNecesidades(p.titulo)) p.tipo = 'necesidades';
+  }
+  for (const x of st.sustituciones || []) {
+    if (x.tipo === 'vida' && esNecesidades(x.titulo)) { x.tipo = 'necesidades'; x.cod = 'necesidades'; }
+  }
+  if (!st.migraciones?.necesidades) {
+    for (const p of st.publicadores || []) {
+      if (p.privilegio === 'anciano' && !(p.asignaciones || []).includes('necesidades')) p.asignaciones = [...(p.asignaciones || []), 'necesidades'];
+    }
+    st.migraciones = { ...(st.migraciones || {}), necesidades: true };
+  }
 }
 function cargar() {
   try {
@@ -282,7 +305,8 @@ function candidatos(sem, parte, rol, ents = entradas()) {
 
   return state.publicadores.filter(p => p.activo).map(p => {
     const motivos = [], avisos = [];
-    if (!(p.asignaciones || []).includes(cod)) motivos.push('no habilitado');
+    if (SOLO_ANCIANOS.includes(cod) && p.privilegio !== 'anciano') motivos.push('solo ancianos');
+    else if (!(p.asignaciones || []).includes(cod)) motivos.push('no habilitado');
     if (p.soloAyudante && rol === 'titular') motivos.push('solo ayudante');
     if (ocupados.has(p.id)) motivos.push('ya tiene parte esta semana');
     if (ausente(p, fecha)) motivos.push('ausente');
@@ -453,7 +477,8 @@ function problemasSemana(sem) {
       if (!x) { out.push(`${que}: el publicador asignado ya no existe`); continue; }
       if (!x.activo) out.push(`${x.nombre} está marcado como inactivo — ${que}`);
       if (ausente(x, fecha)) out.push(`${x.nombre} estará ausente ese día — ${que}`);
-      if (!(x.asignaciones || []).includes(codDe(p, rol))) out.push(`${x.nombre} no está habilitado para esta parte — ${que}`);
+      if (SOLO_ANCIANOS.includes(codDe(p, rol)) && x.privilegio !== 'anciano') out.push(`${x.nombre} no es anciano — ${que} es solo para ancianos`);
+      else if (!(x.asignaciones || []).includes(codDe(p, rol))) out.push(`${x.nombre} no está habilitado para esta parte — ${que}`);
       cuenta.set(id, (cuenta.get(id) || 0) + 1);
     }
     if (t.ayu === 'ayudante' && p.titular && p.ayudante) {
@@ -643,7 +668,7 @@ function vistaCuadrante() {
     const partes = partesOrdenadas(sem).filter(p => TIPOS[p.tipo].sec === sec);
     const add = publicada ? '' : {
       maestros: `<span class="row"><button class="small" data-act="add-parte" data-tipo="maestros">+ Demostración</button><button class="small" data-act="add-parte" data-tipo="discurso_est">+ Discurso</button></span>`,
-      vida: `<button class="small" data-act="add-parte" data-tipo="vida">+ Parte</button>`,
+      vida: `<span class="row"><button class="small" data-act="add-parte" data-tipo="vida">+ Parte</button><button class="small" data-act="add-parte" data-tipo="necesidades">+ Necesidades</button></span>`,
     }[sec] || '';
     html += `<div class="sec-head sec-${sec}"><span>${secLabel}</span>${add}</div>`;
     // Las partes de la sala auxiliar con gemela se dibujan junto a la principal
@@ -1153,7 +1178,7 @@ function asignacionesSugeridas(p) {
   if (p.soloAyudante) return ['ayudante'];
   if (p.sexo === 'M') return ['maestros', 'ayudante'];
   return {
-    anciano: ['presidente', 'consejero_b', 'oracion', 'tesoros', 'perlas', 'vida', 'estudio_conductor', 'estudio_lector'],
+    anciano: ['presidente', 'consejero_b', 'oracion', 'tesoros', 'perlas', 'vida', 'necesidades', 'estudio_conductor', 'estudio_lector'],
     siervo: ['oracion', 'tesoros', 'perlas', 'vida', 'estudio_lector', 'lectura', 'maestros', 'ayudante', 'discurso_est'],
     publicador: ['oracion', 'lectura', 'maestros', 'ayudante', 'discurso_est', 'estudio_lector'],
     no_bautizado: ['lectura', 'maestros', 'ayudante', 'discurso_est'],
@@ -1344,7 +1369,7 @@ function histResumen() {
 }
 
 function abrev(c) {
-  return { presidente: 'Pres', consejero_b: 'Cons', oracion: 'Orac', tesoros: 'Tes', perlas: 'Perl', lectura: 'Lect', maestros: 'Dem', ayudante: 'Ayud', discurso_est: 'Disc', vida: 'Vida', estudio_conductor: 'EBC', estudio_lector: 'Lector', analisis: '¿Qué?' }[c];
+  return { presidente: 'Pres', consejero_b: 'Cons', oracion: 'Orac', tesoros: 'Tes', perlas: 'Perl', lectura: 'Lect', maestros: 'Dem', ayudante: 'Ayud', discurso_est: 'Disc', vida: 'Vida', necesidades: 'Nec', estudio_conductor: 'EBC', estudio_lector: 'Lector', analisis: '¿Qué?' }[c];
 }
 
 function histDetalle() {
@@ -1821,6 +1846,13 @@ document.addEventListener('change', e => {
       parte.titulo = el.value;
       const gem = gemela(sem, parte);
       if (gem) gem.titulo = el.value;
+      // Si se escribe «Necesidades de la congregación», la parte pasa a ser solo para ancianos (y al revés)
+      const tipoNuevo = parte.tipo === 'vida' && esNecesidades(el.value) ? 'necesidades' : parte.tipo === 'necesidades' && !esNecesidades(el.value) ? 'vida' : null;
+      if (tipoNuevo) {
+        parte.tipo = tipoNuevo;
+        if (parte.titular && !candidatos(sem, parte, 'titular').find(c => c.p.id === parte.titular && !c.motivos.length)) aviso(`${nombre(parte.titular)} no es anciano: elige a otro para esta parte`);
+        if (document.activeElement === el) el.addEventListener('blur', () => render(), { once: true }); else render();
+      }
       guardar(); break;
     }
     case 'sala-aux': {
