@@ -269,6 +269,7 @@ function candidatos(sem, parte, rol, ents = entradas()) {
     const mias = porPub.get(p.id) || [];
     const dMisma = masCercana(mias.filter(e => e.cod === cod), fecha);
     const dCualquiera = masCercana(mias, fecha);
+    const ultima = mias.filter(e => e.fecha < fecha).sort((x, y) => y.fecha.localeCompare(x.fecha))[0] || null;
     const carga = mias.filter(e => Math.abs(diasEntre(fecha, e.fecha)) <= 182).length;
     // Base: tiempo sin esta parte y sin ninguna parte (máx. 1 año), menos su carga reciente
     let score = Math.min(Math.abs(dMisma ?? 9999), 365) + 0.6 * Math.min(Math.abs(dCualquiera ?? 9999), 365) - 8 * carga;
@@ -291,7 +292,7 @@ function candidatos(sem, parte, rol, ents = entradas()) {
       const dPar = masCercana(mias.filter(e => e.companero === companero.id), fecha);
       if (dPar != null && Math.abs(dPar) < 120) { score -= 60; avisos.push(`ya fueron pareja ${relativo(dPar)}`); }
     }
-    return { p, motivos, avisos, dMisma, dCualquiera, carga, score, azar: sorteo(p.id + sem.lunes + parte.tipo + rol) };
+    return { p, motivos, avisos, dMisma, dCualquiera, carga, score, ultima, fechaRef: fecha, azar: sorteo(p.id + sem.lunes + parte.tipo + rol) };
   }).sort((a, b) => b.score - a.score || a.azar - b.azar);
 }
 
@@ -519,7 +520,18 @@ function render() {
   const bd = $('#deshacer');
   bd.hidden = !pilaDeshacer.length;
   main.innerHTML = vistas[ui.vista]();
+  ajustarPapel();
 }
+
+// En pantallas estrechas la vista previa se reduce entera, como una hoja de papel
+function ajustarPapel() {
+  document.querySelectorAll('.papel').forEach(el => {
+    const ancho = el.parentElement.clientWidth;
+    const z = Math.min(1, ancho / 794);
+    el.style.zoom = z < 1 ? z.toFixed(3) : '';
+  });
+}
+window.addEventListener('resize', ajustarPapel);
 
 function renderAviso() {
   const el = $('#aviso');
@@ -581,44 +593,16 @@ function vistaCuadrante() {
 
   const publicada = sem.estado === 'publicada';
   const ents = entradas();
-  const vacios = huecos(sem);
   const problemas = problemasSemana(sem);
 
-  html += `<div class="card">
-    <div class="row between">
-      <div class="row">
-        <span class="badge ${publicada ? 'ok' : 'warn'}">${publicada ? 'Publicada' : 'Borrador'}</span>
-        <span class="muted small">Reunión: ${fechaLarga(fechaReunion(sem))}</span>
-        ${!sem.sinReunion && vacios ? `<span class="badge gray">${vacios} sin asignar</span>` : ''}
-      </div>
-      <div class="row">
-        ${!sem.sinReunion && !publicada ? `<button data-act="sugerir-vacios">✨ Sugerir vacíos</button><button data-act="vaciar">Vaciar</button>` : ''}
-        ${publicada ? `<button data-act="despublicar">Volver a borrador</button>` : `<button class="primary" data-act="publicar">Publicar</button>`}
-        <button class="danger" data-act="borrar-sem">Eliminar</button>
-      </div>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <label class="field grow"><span>Lectura bíblica semanal</span>
-        <input data-act="lectura-semanal" value="${esc(sem.lecturaSemanal)}" placeholder="p. ej. ISAÍAS 58, 59"></label>
-      ${sem.sinReunion ? '' : `<label class="row" style="margin-top:18px" title="Añade o quita las partes de estudiante de la sala auxiliar en esta semana"><input type="checkbox" data-act="sala-aux" ${semTieneAux(sem) ? 'checked' : ''} ${publicada ? 'disabled' : ''}> Sala auxiliar</label>`}
-      <label class="row" style="margin-top:18px"><input type="checkbox" data-act="sin-reunion" ${sem.sinReunion ? 'checked' : ''}> Sin reunión</label>
-      ${sem.sinReunion ? `<label class="field grow"><span>Motivo</span><input data-act="motivo-sin" value="${esc(sem.motivoSinReunion)}" placeholder="Asamblea, visita del superintendente…"></label>` : ''}
-    </div>
-    <div class="row" style="margin-top:10px;align-items:flex-end">
-      ${selectorEspecial(sem.lunes)}
-      ${sem.sinReunion ? '' : `<div class="field"><span>Canciones (inicio · medio · final)</span><div class="row canciones">
-        ${[0, 1, 2].map(i => `<input data-act="cancion" data-i="${i}" inputmode="numeric" value="${esc((sem.canciones || [])[i] || '')}" placeholder="${['Inicio', 'Medio', 'Final'][i]}">`).join('')}</div></div>`}
-    </div>
-    ${publicada ? `<p class="small muted" style="margin:10px 0 0">La semana está publicada: los cambios de personas se registran como <b>sustituciones</b> en el historial.</p>` : ''}
-    ${problemas.length ? `<div class="problemas">${problemas.map(x => `<div>⚠ ${esc(x)}</div>`).join('')}</div>` : ''}
-  </div>`;
+  html += tarjetaPasos(sem, problemas);
+  if (sem.sinReunion) return html + opcionesSemana(sem, publicada);
+  if (publicada) html += tarjetaAvisos(sem);
 
-  if (sem.sinReunion) return html;
-
-  html += `<div class="card"><datalist id="dl-maestros">${SUBTIPOS_MAESTROS.map(s => `<option value="${s}">`).join('')}<option value="Discurso"></datalist>`;
+  html += `<div class="card partes-card"><datalist id="dl-maestros">${SUBTIPOS_MAESTROS.map(s => `<option value="${s}">`).join('')}<option value="Discurso"></datalist>`;
   for (const [sec, secLabel] of SECCIONES) {
     const partes = partesOrdenadas(sem).filter(p => TIPOS[p.tipo].sec === sec);
-    const add = {
+    const add = publicada ? '' : {
       maestros: `<span class="row"><button class="small" data-act="add-parte" data-tipo="maestros">+ Demostración</button><button class="small" data-act="add-parte" data-tipo="discurso_est">+ Discurso</button></span>`,
       vida: `<button class="small" data-act="add-parte" data-tipo="vida">+ Parte</button>`,
     }[sec] || '';
@@ -628,8 +612,7 @@ function vistaCuadrante() {
     html += visibles.map(p => filaParte(sem, p, publicada, ents)).join('') || `<p class="muted small">Sin partes.</p>`;
   }
   html += `</div>`;
-
-  html += tarjetaAvisos(sem);
+  html += opcionesSemana(sem, publicada);
 
   const subs = state.sustituciones.filter(x => x.semanaId === sem.id);
   if (subs.length) {
@@ -638,39 +621,237 @@ function vistaCuadrante() {
   return html;
 }
 
+// Los cuatro pasos de cada semana y el botón con lo siguiente que hay que hacer
+function tarjetaPasos(sem, problemas) {
+  const publicada = sem.estado === 'publicada';
+  const fecha = `${fechaLarga(fechaReunion(sem))}`;
+  if (sem.sinReunion) {
+    return `<div class="card pasos-card"><div class="pasos-fecha">${fecha}</div>
+      <p class="pasos-txt"><b>Sin reunión esta semana</b>${sem.motivoSinReunion ? ' · ' + esc(sem.motivoSinReunion) : ''}.</p></div>`;
+  }
+  const h = huecos(sem);
+  const lista = asignacionesDe(sem);
+  const pendientes = lista.filter(a => !a.parte.avisos?.[a.rol]).length;
+  const desdeGuia = sem.partes.some(p => p.num);
+  const estado = (hecho, actual) => hecho ? 'hecho' : actual ? 'actual' : '';
+  const pasos = [
+    ['Programa', desdeGuia ? 'de jw.org' : 'plantilla', 'hecho'],
+    ['Asignar', h ? `${h} ${h === 1 ? 'libre' : 'libres'}` : 'completo', estado(!h, !publicada && h)],
+    ['Publicar', publicada ? 'publicada' : 'borrador', estado(publicada, !publicada && !h)],
+    ['Avisar', publicada ? (pendientes ? `${pendientes} pendientes` : 'todos') : `${lista.length} personas`, estado(publicada && !pendientes, publicada && pendientes)],
+  ];
+  let accion, ayuda;
+  if (!publicada && h) {
+    accion = `<button class="primary grande" data-act="sugerir-vacios">✨ Rellenar ${h === 1 ? 'el hueco' : `los ${h} huecos`} con sugerencias</button>`;
+    ayuda = 'Propone a quien más tiempo lleva sin esa parte. Después toca cualquier nombre para cambiarlo.';
+  } else if (!publicada) {
+    accion = `<button class="primary grande" data-act="publicar">✓ Publicar la semana</button>`;
+    ayuda = problemas.length ? 'Revisa antes los avisos en rojo.' : 'Al publicarla podrás avisar a cada uno. Los cambios posteriores se guardan como sustituciones.';
+  } else if (pendientes) {
+    accion = `<button class="primary grande" data-act="ir-avisos">📲 Avisar a ${pendientes === 1 ? '1 persona' : `${pendientes} personas`}</button>`;
+    ayuda = 'Cada aviso abre WhatsApp con el mensaje ya escrito.';
+  } else {
+    accion = `<button class="grande" data-act="ir-s89">🖨 Imprimir las hojas S-89 de esta semana</button>`;
+    ayuda = '¡Semana lista! Todos están avisados.';
+  }
+  return `<div class="card pasos-card">
+    <div class="pasos-fecha">${fecha}</div>
+    <ol class="pasos">${pasos.map(([t, sub, st], i) => `<li class="${st}"><span class="paso-n">${st === 'hecho' ? '✓' : i + 1}</span><span><b>${t}</b><small>${sub}</small></span></li>`).join('')}</ol>
+    <div class="pasos-accion">${accion}<p class="small muted">${ayuda}</p></div>
+    ${problemas.length ? `<div class="problemas">${problemas.map(x => `<div>⚠ ${esc(x)}</div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+// Lo que se toca poco va plegado
+function opcionesSemana(sem, publicada) {
+  return `<div class="card opciones ${ui.opcionesAbiertas ? 'abierta' : ''}">
+    <button class="opciones-tit" data-act="toggle-opciones">⚙ Más opciones de esta semana <span>${ui.opcionesAbiertas ? '▲' : '▼'}</span></button>
+    ${ui.opcionesAbiertas ? `<div class="opciones-cuerpo">
+      <div class="form-grid">
+        <label class="field full"><span>Lectura bíblica semanal</span><input data-act="lectura-semanal" value="${esc(sem.lecturaSemanal)}" placeholder="p. ej. ISAÍAS 58, 59"></label>
+        ${sem.sinReunion ? '' : `<div class="field"><span>Canciones (inicio · medio · final)</span><div class="row canciones">
+          ${[0, 1, 2].map(i => `<input data-act="cancion" data-i="${i}" inputmode="numeric" value="${esc((sem.canciones || [])[i] || '')}" placeholder="${['Inicio', 'Medio', 'Final'][i]}">`).join('')}</div></div>`}
+        <div class="field">${selectorEspecial(sem.lunes)}</div>
+      </div>
+      <div class="row" style="margin-top:12px;gap:18px">
+        ${sem.sinReunion ? '' : `<label class="row"><input type="checkbox" data-act="sala-aux" ${semTieneAux(sem) ? 'checked' : ''} ${publicada ? 'disabled' : ''}> Sala auxiliar</label>`}
+        <label class="row"><input type="checkbox" data-act="sin-reunion" ${sem.sinReunion ? 'checked' : ''}> Sin reunión</label>
+      </div>
+      ${sem.sinReunion ? `<label class="field" style="margin-top:10px"><span>Motivo</span><input data-act="motivo-sin" value="${esc(sem.motivoSinReunion)}" placeholder="Asamblea, Conmemoración…"></label>` : ''}
+      <div class="row" style="margin-top:14px">
+        ${!sem.sinReunion && !publicada ? `<button data-act="sugerir-vacios">✨ Sugerir vacíos</button><button data-act="vaciar">Vaciar asignaciones</button>` : ''}
+        ${publicada ? `<button data-act="despublicar">Volver a borrador</button>` : (!sem.sinReunion ? `<button data-act="publicar">Publicar</button>` : '')}
+        <button class="danger" data-act="borrar-sem">Eliminar semana</button>
+      </div>
+    </div>` : ''}
+  </div>`;
+}
+
 function filaParte(sem, p, publicada, ents) {
   const t = TIPOS[p.tipo];
   const gem = p.sala === 'A' ? gemela(sem, p) : null;
-  const salaBadge = p.sala === 'B' ? `<span class="badge warn">Sala aux.</span>` : '';
+  const salaBadge = p.sala === 'B' ? ` <span class="badge warn">Sala aux.</span>` : '';
   const borrable = ['maestros', 'discurso_est', 'analisis', 'vida'].includes(p.tipo);
   const titulo = t.titulo
     ? `<input class="titulo" data-act="titulo" data-parte="${p.id}" value="${esc(p.titulo)}" placeholder="Tema / referencia" ${p.tipo === 'maestros' ? 'list="dl-maestros"' : ''}>`
-    : '<div></div>';
+    : '';
   const bloque = x => {
     const slots = [slot(sem, x, 'titular', t.ayu ? (p.tipo === 'estudio' ? 'Conductor' : 'Titular') : '', publicada, ents)];
     if (t.ayu) slots.push(slot(sem, x, 'ayudante', t.ayuLabel, publicada, ents));
     return slots.join('');
   };
-  const cuerpo = t.fijo ? `<div class="slot"><div class="fijo vacio">Lo presenta el superintendente de circuito</div></div>` : gem
+  const cuerpo = t.fijo ? `<div class="slot-btn fijo">Lo presenta el superintendente de circuito</div>` : gem
     ? `<div class="sala-blk"><span class="sala-tag">Sala principal</span>${bloque(p)}</div><div class="sala-blk aux"><span class="sala-tag">Sala auxiliar</span>${bloque(gem)}</div>`
     : bloque(p);
   return `<div class="parte">
-    <div class="p-tipo">${p.num ? `<span class="muted">${p.num}.</span> ` : ''}${t.label}${salaBadge}
-      ${p.min || p.leccion ? `<div class="small muted">${[p.min ? p.min + ' min' : '', p.leccion ? 'lección ' + esc(p.leccion.replace(/^lecci[óo]n /, '')) : ''].filter(Boolean).join(' · ')}</div>` : ''}</div>
+    <div class="p-cab">
+      <div class="p-tipo">${p.num ? `<span class="muted">${p.num}.</span> ` : ''}${t.label}${salaBadge}
+        ${p.min || p.leccion ? `<span class="small muted p-meta">${[p.min ? p.min + ' min' : '', p.leccion ? 'lección ' + esc(p.leccion.replace(/^lecci[óo]n /, '')) : ''].filter(Boolean).join(' · ')}</span>` : ''}</div>
+      ${borrable && !publicada ? `<button class="icon small danger" data-act="del-parte" data-parte="${p.id}" title="Quitar parte">✕</button>` : ''}
+    </div>
     ${titulo}
     <div class="p-slots">${cuerpo}</div>
-    <div>${borrable && !publicada ? `<button class="icon small danger" data-act="del-parte" data-parte="${p.id}" title="Quitar parte">✕</button>` : ''}</div>
   </div>`;
 }
 
+// Cada puesto es un botón: muestra a la persona y al tocarlo se elige o se cambia
 function slot(sem, p, rol, label, publicada, ents) {
-  const lab = label ? `<label>${label}</label>` : '';
-  if (publicada && p[rol]) {
-    return `<div class="slot">${lab}<div class="fijo">${esc(nombre(p[rol]))}</div>
-      <button class="small" data-act="sustituir" data-parte="${p.id}" data-rol="${rol}">Sustituir</button></div>`;
+  const id = p[rol];
+  let hace = '';
+  if (id && ents) {
+    const cod = codDe(p, rol), f = fechaReunion(sem);
+    const prev = ents.filter(e => e.estado === 'asignada' && e.pub === id && e.cod === cod && e.fecha < f).map(e => e.fecha).sort().pop();
+    hace = prev ? `esta parte hacía ${relativo(diasEntre(f, prev)).replace('hace ', '')}` : 'primera vez en esta parte';
   }
-  return `<div class="slot">${lab}<select data-act="asignar" data-parte="${p.id}" data-rol="${rol}">${opcionesSelect(sem, p, rol, ents)}</select>
-    <button class="small icon" data-act="candidatos" data-parte="${p.id}" data-rol="${rol}" title="Ver candidatos y por qué">🔍</button></div>`;
+  const x = id ? pub(id) : null;
+  const av = p.avisos?.[rol];
+  const mal = id && (!x || !x.activo || ausente(x, fechaReunion(sem)) || !(x.asignaciones || []).includes(codDe(p, rol)));
+  return `<button class="slot-btn ${id ? '' : 'vacio'} ${mal ? 'mal' : ''}" data-act="elegir" data-parte="${p.id}" data-rol="${rol}">
+    ${label ? `<span class="slot-rol">${label}</span>` : ''}
+    <span class="slot-nombre">${id ? esc(nombre(id)) : 'Elegir…'}${hace ? `<small>${hace}</small>` : ''}</span>
+    ${mal ? '<span class="slot-est mal">⚠</span>' : publicada && id ? `<span class="slot-est ${av ? 'ok' : ''}">${av ? '✓ avisado' : 'sin avisar'}</span>` : ''}
+    <span class="slot-chev">›</span>
+  </button>`;
+}
+
+/* ================= Selector de persona ================= */
+
+// Semanas sin esta parte, con color: verde = hace mucho, rojo = muy reciente
+function medidor(d, clase = '') {
+  if (d == null) return `<span class="medidor m-nunca ${clase}"><b>Nunca</b><small>esta parte</small></span>`;
+  const sem = Math.round(Math.abs(d) / 7);
+  const nivel = d > 0 ? 'm-prox' : sem >= 12 ? 'm-mucho' : sem >= 6 ? 'm-bien' : sem >= 3 ? 'm-poco' : 'm-reciente';
+  const num = sem >= 9 ? `${Math.round(sem / 4.35)}` : `${sem}`;
+  const ud = sem >= 9 ? (Math.round(sem / 4.35) === 1 ? 'mes' : 'meses') : (sem === 1 ? 'sem' : 'sem');
+  return `<span class="medidor ${nivel} ${clase}"><b>${d > 0 ? 'en ' : ''}${num} ${ud}</b><small>${d > 0 ? 'la tiene' : 'sin esta parte'}</small></span>`;
+}
+
+function ultimaParte(c) {
+  if (!c.ultima) return 'Aún no ha tenido ninguna parte';
+  const t = TIPOS[c.ultima.tipo];
+  const d = fromISO(c.ultima.fecha);
+  const antes = relativo(diasEntre(c.fechaRef, c.ultima.fecha)).replace('hace ', '');
+  return `Última: ${t?.label ?? ''}${c.ultima.rol === 'ayudante' ? ` (${t.ayuLabel.toLowerCase()})` : ''} · ${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)} (${antes} antes)`;
+}
+
+function barraCarga(n, max) {
+  return `<span class="carga" title="${n} partes en los últimos 6 meses"><span class="carga-t"><span style="width:${max ? Math.max(4, n / max * 100) : 0}%"></span></span>${n} en 6 meses</span>`;
+}
+
+function razones(c) {
+  const r = [];
+  if (c.dMisma == null) r.push('nunca ha tenido esta parte');
+  else r.push(c.dMisma < 0 ? `hizo esta parte ${relativo(c.dMisma)}` : `tiene esta parte ${relativo(c.dMisma)}`);
+  const yaAvisado = c.avisos.some(a => a.startsWith('otra parte'));
+  if (c.dCualquiera != null && c.dCualquiera !== c.dMisma && !yaAvisado) r.push(c.dCualquiera < 0 ? `su última parte fue ${relativo(c.dCualquiera)}` : `tiene otra parte ${relativo(c.dCualquiera)}`);
+  r.push(`${c.carga} ${c.carga === 1 ? 'parte' : 'partes'} en 6 meses`);
+  const txt = r.join(' · ');
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+function registrarSustitucion(sem, parte, rol, nuevo, motivo) {
+  state.sustituciones.push({
+    id: uid(), registrado: new Date().toISOString(), semanaId: sem.id, parteId: parte.id,
+    tipo: parte.tipo, titulo: parte.titulo, sala: parte.sala, rol, cod: codDe(parte, rol),
+    original: parte[rol], sustituto: nuevo, motivo,
+  });
+  parte[rol] = nuevo;
+  marcarAvisado(parte, rol, null);
+}
+
+function abrirSelector(sem, parte, rol) {
+  const t = TIPOS[parte.tipo];
+  const actual = parte[rol];
+  const sustituye = sem.estado === 'publicada' && !!actual;
+  const lista = candidatos(sem, { ...parte, [rol]: null }, rol).filter(c => c.p.id !== actual);
+  const aptos = lista.filter(c => !c.motivos.length);
+  const top = aptos.slice(0, 3);
+  const resto = aptos.slice(3);
+  const noAptos = lista.filter(c => c.motivos.length);
+  let q = '', motivo = '', verNoAptos = false;
+
+  const maxCarga = Math.max(1, ...lista.map(c => c.carga));
+  const fila = c => `<button class="sel-fila ${c.motivos.length ? 'no' : ''}" data-dlg="elegir" data-id="${c.p.id}">
+    ${medidor(c.dMisma, 'peq')}
+    <span class="sel-fila-txt"><b>${esc(c.p.nombre)}</b>
+      <small>${c.motivos.length ? esc(c.motivos.join(', ')) : esc(ultimaParte(c))}</small>
+      ${c.avisos.length && !c.motivos.length ? `<small class="sel-aviso">⚠ ${esc(c.avisos.join(', '))}</small>` : ''}</span>
+    ${c.motivos.length ? '' : barraCarga(c.carga, maxCarga)}</button>`;
+  const pintarLista = () => {
+    const nq = sinAcentos(q.trim());
+    if (nq) {
+      const vis = lista.filter(c => sinAcentos(c.p.nombre).includes(nq));
+      return vis.length ? vis.map(fila).join('') : `<p class="muted small" style="padding:8px">Nadie coincide.</p>`;
+    }
+    return (resto.length ? resto.map(fila).join('') : `<p class="muted small" style="padding:4px 8px">No hay más personas aptas.</p>`) +
+      (noAptos.length ? (verNoAptos ? `<div class="sel-sec">No recomendados</div>${noAptos.map(fila).join('')}`
+        : `<button class="small" style="margin-top:6px" data-dlg="ver-no">Ver también ${noAptos.length} no recomendados</button>`) : '');
+  };
+  const pintar = () => {
+    const sub = [parte.titulo, fechaLarga(fechaReunion(sem)), semTieneAux(sem) && (t.salas || parte.tipo === 'consejero_b') ? (parte.sala === 'B' ? 'sala auxiliar' : 'sala principal') : ''].filter(Boolean);
+    $('#dlg-body').innerHTML = `
+      <div class="sel-cab">
+        <div><div class="sel-tit">${t.label}${rol === 'ayudante' ? ` · ${t.ayuLabel}` : t.ayu ? (parte.tipo === 'estudio' ? ' · Conductor' : ' · Titular') : ''}</div>
+          <div class="small muted">${esc(sub.join(' · '))}</div></div>
+        <button class="icon" data-dlg="cerrar" title="Cerrar">✕</button>
+      </div>
+      ${actual ? `<div class="sel-actual"><span>Ahora: <b>${esc(nombre(actual))}</b></span>${sustituye ? '' : '<button class="small danger" data-dlg="quitar">Quitar</button>'}</div>` : ''}
+      ${sustituye ? `<div class="sel-motivo"><span class="small muted">La semana está publicada: el cambio quedará como <b>sustitución</b>. ¿Por qué?</span>
+        <div class="chips-sel">${['Enfermedad', 'Viaje', 'Trabajo', 'Asuntos familiares', 'No contestó'].map(m => `<button class="chip ${motivo === m ? 'on' : ''}" data-dlg="motivo" data-m="${m}">${m}</button>`).join('')}</div>
+        <input id="sel-motivo" placeholder="Otro motivo (opcional)" value="${esc(['Enfermedad', 'Viaje', 'Trabajo', 'Asuntos familiares', 'No contestó'].includes(motivo) ? '' : motivo)}"></div>` : ''}
+      <div class="sel-sec">Recomendados</div>
+      ${top.length ? `<div class="recos">${top.map((c, i) => `<button class="reco ${i === 0 ? 'mejor' : ''}" data-dlg="elegir" data-id="${c.p.id}">
+          ${i === 0 ? '<span class="reco-tag">★ Mejor opción</span>' : ''}
+          <div class="reco-top">${medidor(c.dMisma)}<b>${esc(c.p.nombre)}</b></div>
+          <span class="reco-ult">${esc(ultimaParte(c))}</span>
+          ${barraCarga(c.carga, maxCarga)}
+          ${c.avisos.length ? `<span class="sel-aviso">⚠ ${esc(c.avisos.join(', '))}</span>` : ''}</button>`).join('')}</div>`
+        : `<p class="muted small">No hay nadie apto para este puesto: revisa en Publicadores quién tiene marcada esta asignación.</p>`}
+      <div class="sel-sec">Otras personas</div>
+      <input type="search" id="sel-buscar" placeholder="Buscar por nombre…" value="${esc(q)}" autocomplete="off">
+      <div id="sel-lista" class="sel-lista">${pintarLista()}</div>`;
+  };
+
+  dlgHandler = (accion, el) => {
+    if (accion === 'cerrar') return cerrarDialogo();
+    if (accion === 'motivo') { motivo = el.dataset.m; return pintar(); }
+    if (accion === 'ver-no') { verNoAptos = true; $('#sel-lista').innerHTML = pintarLista(); return; }
+    if (accion === 'quitar') { parte[rol] = null; marcarAvisado(parte, rol, null); cerrarDialogo(); return commit(); }
+    if (accion !== 'elegir') return;
+    const id = el.dataset.id;
+    if (!confirmarNoApto(sem, { ...parte, [rol]: null }, rol, id)) return;
+    if (sustituye) registrarSustitucion(sem, parte, rol, id, (motivo || $('#sel-motivo')?.value || '').trim());
+    else { parte[rol] = id; marcarAvisado(parte, rol, null); }
+    cerrarDialogo(); commit();
+  };
+  pintar();
+  $('#dlg-body').onchange = null;
+  $('#dlg-body').oninput = e => {
+    if (e.target.id === 'sel-buscar') { q = e.target.value; $('#sel-lista').innerHTML = pintarLista(); }
+    if (e.target.id === 'sel-motivo') motivo = e.target.value;
+  };
+  $('#dlg').classList.add('hoja-abajo');
+  $('#dlg').showModal();
 }
 
 function selectorModo() {
@@ -794,26 +975,30 @@ function telefonoWa(tel) {
 function tarjetaAvisos(sem) {
   const lista = asignacionesDe(sem);
   if (!lista.length) return '';
-  const pendientes = lista.filter(a => !a.parte.avisos?.[a.rol]).length;
-  return `<div class="card">
-    <div class="row between"><h3 style="margin:0">Avisos</h3>
-      <span class="badge ${pendientes ? 'warn' : 'ok'}">${pendientes ? `${pendientes} sin avisar` : 'Todos avisados'}</span></div>
-    <div class="tabla-wrap" style="margin-top:8px"><table><tbody>${lista.map(a => {
+  const pendientes = lista.filter(a => !a.parte.avisos?.[a.rol]);
+  const orden = [...pendientes, ...lista.filter(a => a.parte.avisos?.[a.rol])];
+  return `<div class="card" id="avisos">
+    <div class="row between"><h3 style="margin:0">📲 Avisos</h3>
+      <span class="badge ${pendientes.length ? 'warn' : 'ok'}">${pendientes.length ? `${pendientes.length} sin avisar` : 'Todos avisados'}</span></div>
+    <p class="small muted" style="margin:6px 0 10px">Pulsa <b>WhatsApp</b> y se abre con el mensaje escrito. Si se lo has dicho en persona, márcalo con <b>✓</b>.</p>
+    <div class="avisos-lista">${orden.map(a => {
       const p = pub(a.id);
       const av = a.parte.avisos?.[a.rol];
       const tel = telefonoWa(p?.telefono);
       const url = `https://wa.me/${tel}?text=${encodeURIComponent(textoAviso(sem, a.parte, a.rol))}`;
-      return `<tr>
-        <td><b>${esc(nombre(a.id))}</b>${tel ? '' : ' <span class="small muted">(sin teléfono)</span>'}</td>
-        <td class="small">${TIPOS[a.parte.tipo].label}${a.rol === 'ayudante' ? ` (${TIPOS[a.parte.tipo].ayuLabel.toLowerCase()})` : ''}</td>
-        <td>${av ? `<span class="badge ok">Avisado ${fechaCorta(av.slice(0, 10)).slice(0, 5)}</span>` : '<span class="badge gray">Pendiente</span>'}</td>
-        <td class="row" style="justify-content:flex-end">
-          <a class="btn small" href="${url}" target="_blank" rel="noopener" data-act="aviso-wa" data-parte="${a.parte.id}" data-rol="${a.rol}">WhatsApp</a>
-          <button class="small" data-act="aviso-copiar" data-parte="${a.parte.id}" data-rol="${a.rol}">Copiar</button>
-          <button class="small icon" data-act="ics-pub" data-id="${a.id}" title="Descargar sus próximas asignaciones para el calendario (.ics)">📅</button>
-          ${av ? `<button class="small icon" data-act="aviso-quitar" data-parte="${a.parte.id}" data-rol="${a.rol}" title="Marcar como pendiente">↺</button>` : ''}
-        </td></tr>`;
-    }).join('')}</tbody></table></div></div>`;
+      const t = TIPOS[a.parte.tipo];
+      const que = `${t.label}${a.rol === 'ayudante' ? ` · ${t.ayuLabel.toLowerCase()}` : ''}${a.parte.sala === 'B' ? ' · sala aux.' : ''}`;
+      const datos = `data-parte="${a.parte.id}" data-rol="${a.rol}"`;
+      return `<div class="aviso-fila ${av ? 'hecho' : ''}">
+        <div class="av-info"><b>${esc(nombre(a.id))}</b><span class="small muted">${esc(que)}${tel ? '' : ' · sin teléfono'}</span></div>
+        <div class="av-acc">
+          ${av ? `<span class="badge ok">✓ Avisado</span><button class="small icon" data-act="aviso-quitar" ${datos} title="Marcar como pendiente">↺</button>`
+            : `<a class="btn wa" href="${url}" target="_blank" rel="noopener" data-act="aviso-wa" ${datos}>WhatsApp</a>
+               <button class="small icon" data-act="aviso-marcar" ${datos} title="Ya avisado (en persona)">✓</button>`}
+          <button class="small icon" data-act="aviso-copiar" ${datos} title="Copiar el mensaje">⧉</button>
+          <button class="small icon" data-act="ics-pub" data-id="${a.id}" title="Sus próximas fechas para el calendario">📅</button>
+        </div></div>`;
+    }).join('')}</div></div>`;
 }
 
 function marcarAvisado(parte, rol, valor = new Date().toISOString()) {
@@ -1188,14 +1373,14 @@ function imprS89(sems) {
     }
   }
   const sinAsignar = elegidas.reduce((n, s) => n + (s.sinReunion ? 0 : s.partes.filter(p => PARTES_ESTUDIANTE.includes(p.tipo) && !p.titular).length), 0);
-  return `<div class="card row no-print">
+  return `<div class="card row no-print barra-impr">
     <label class="row">Mes <input type="month" data-act="mes-imprimir" value="${ui.mesImprimir}"></label>
     <select data-act="sem-imprimir"><option value="">Todas las semanas</option>
       ${sems.map(s => `<option value="${s.id}" ${ui.semImprimir === s.id ? 'selected' : ''}>${rangoSemana(s.lunes)}</option>`).join('')}</select>
     <button class="primary" data-act="imprimir" ${hojas.length ? '' : 'disabled'}>🖨 Imprimir / Guardar PDF</button>
     <span class="muted small">${hojas.length} hojas${sinAsignar ? ` · ${sinAsignar} partes de estudiante sin asignar` : ''}</span>
   </div>
-  ${hojas.length ? `<div class="s89-grid">${hojas.join('')}</div>` : `<div class="card empty">No hay partes de estudiante asignadas en este periodo.</div>`}`;
+  ${hojas.length ? `<div class="papel-zona"><div class="papel"><div class="s89-grid">${hojas.join('')}</div></div></div>` : `<div class="card empty">No hay partes de estudiante asignadas en este periodo.</div>`}`;
 }
 
 function hojaS89(s, p) {
@@ -1253,17 +1438,17 @@ function imprPrograma(sems) {
     return `<div class="p-sem">${cab}<table>${rows}</table></div>`;
   };
 
-  return `<div class="card row no-print">
+  return `<div class="card row no-print barra-impr">
     <label class="row">Mes <input type="month" data-act="mes-imprimir" value="${mes}"></label>
     <button class="primary" data-act="imprimir" ${sems.length ? '' : 'disabled'}>🖨 Imprimir / Guardar PDF</button>
     <button data-act="ics-mes" ${sems.length ? '' : 'disabled'} title="Todas las asignaciones del mes en un archivo para Google Calendar, Outlook o el iPhone">📅 Calendario del mes (.ics)</button>
     <span class="muted small">${sems.length} semanas · ${sems.filter(s => s.estado !== 'publicada' && !s.sinReunion).length} en borrador</span>
   </div>
-  ${sems.length ? `<div class="hoja">
+  ${sems.length ? `<div class="papel-zona"><div class="papel hoja">
     <h1>Programa de la reunión Vida y Ministerio Cristiano</h1>
     <div class="sub">${esc(c.congregacion)}${c.congregacion ? ' · ' : ''}${MESES[m - 1]} ${y}</div>
     ${sems.map(bloque).join('')}
-  </div>` : `<div class="card empty">No hay semanas creadas en este mes.</div>`}`;
+  </div></div>` : `<div class="card empty">No hay semanas creadas en este mes.</div>`}`;
 }
 
 /* ================= Vista: Ajustes ================= */
@@ -1347,13 +1532,19 @@ let dlgHandler = null;
 function abrirDialogo(html, onOk) {
   $('#dlg-body').innerHTML = html;
   $('#dlg-body').onchange = null;
+  $('#dlg-body').oninput = null;
   dlgHandler = accion => {
     if (accion === 'ok') { if (onOk() !== false) cerrarDialogo(); }
     else if (accion === 'cerrar') cerrarDialogo();
   };
   $('#dlg').showModal();
 }
-function cerrarDialogo() { $('#dlg').close(); dlgHandler = null; }
+function cerrarDialogo() {
+  $('#dlg').close();
+  $('#dlg').classList.remove('hoja-abajo');
+  $('#dlg-body').oninput = null;
+  dlgHandler = null;
+}
 $('#dlg').addEventListener('click', e => {
   const b = e.target.closest('[data-dlg]');
   if (b && dlgHandler) { e.preventDefault(); dlgHandler(b.dataset.dlg, b); }
@@ -1467,7 +1658,13 @@ document.addEventListener('click', e => {
         }
       }
       break;
-    case 'sustituir': abrirSustitucion(sem, parte, el.dataset.rol); break;
+    case 'sustituir': case 'elegir': abrirSelector(sem, parte, el.dataset.rol); break;
+    case 'toggle-opciones': ui.opcionesAbiertas = !ui.opcionesAbiertas; render(); break;
+    case 'ir-avisos': $('#avisos')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
+    case 'ir-s89':
+      ui.vista = 'imprimir'; ui.impr = 's89'; ui.mesImprimir = fechaReunion(sem).slice(0, 7); ui.semImprimir = sem.id;
+      render(); scrollTo(0, 0); break;
+    case 'aviso-marcar': marcarAvisado(parte, el.dataset.rol); commit(); break;
     case 'del-sus':
       if (confirm('¿Borrar este registro de sustitución? (No cambia quién está asignado ahora)')) {
         state.sustituciones = state.sustituciones.filter(x => x.id !== el.dataset.id); commit();

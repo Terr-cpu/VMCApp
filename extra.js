@@ -146,7 +146,7 @@ function imprPresidente(sems) {
     </div>`;
   };
   const sinCanciones = elegidas.filter(s => !(s.canciones || []).some(Boolean)).length;
-  return `<div class="card row no-print">
+  return `<div class="card row no-print barra-impr">
     <label class="row">Mes <input type="month" data-act="mes-imprimir" value="${ui.mesImprimir}"></label>
     <select data-act="sem-imprimir"><option value="">Todas las semanas</option>
       ${sems.map(s => `<option value="${s.id}" ${ui.semImprimir === s.id ? 'selected' : ''}>${rangoSemana(s.lunes)}</option>`).join('')}</select>
@@ -154,7 +154,7 @@ function imprPresidente(sems) {
     <button class="primary" data-act="imprimir" ${elegidas.length ? '' : 'disabled'}>🖨 Imprimir / Guardar PDF</button>
     ${sinCanciones ? `<span class="muted small">${sinCanciones} semanas sin números de canción (se rellenan al importar de jw.org o en cada semana)</span>` : ''}
   </div>
-  ${elegidas.length ? `<div class="pres-lista">${elegidas.map(hoja).join('')}</div>` : `<div class="card empty">No hay reuniones en este periodo.</div>`}`;
+  ${elegidas.length ? `<div class="papel-zona"><div class="papel pres-lista">${elegidas.map(hoja).join('')}</div></div>` : `<div class="card empty">No hay reuniones en este periodo.</div>`}`;
 }
 
 /* ================= Calendario (.ics) ================= */
