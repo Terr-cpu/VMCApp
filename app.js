@@ -19,9 +19,10 @@ const ASIG = {
   vida: 'Nuestra vida cristiana',
   estudio_conductor: 'Conductor del estudio',
   estudio_lector: 'Lector del estudio',
+  analisis: '¿Qué dirías? (análisis)',
 };
 const SOLO_VARONES = ['presidente', 'consejero_b', 'oracion', 'tesoros', 'perlas', 'lectura',
-  'discurso_est', 'vida', 'estudio_conductor', 'estudio_lector'];
+  'discurso_est', 'vida', 'estudio_conductor', 'estudio_lector', 'analisis'];
 
 const PRIVILEGIOS = {
   anciano: 'Anciano',
@@ -48,7 +49,7 @@ const TIPOS = {
   lectura:      { sec: 'tesoros',  orden: 3, label: 'Lectura de la Biblia', cod: 'lectura', salas: true, titulo: true },
   maestros:     { sec: 'maestros', orden: 1, label: 'Demostración', cod: 'maestros', ayu: 'ayudante', ayuLabel: 'Ayudante', salas: true, titulo: true },
   discurso_est: { sec: 'maestros', orden: 1, label: 'Discurso', cod: 'discurso_est', salas: true, titulo: true },
-  analisis:     { sec: 'maestros', orden: 1, label: 'Análisis con el auditorio', cod: 'vida', titulo: true },
+  analisis:     { sec: 'maestros', orden: 1, label: '¿Qué dirías?', cod: 'analisis', salas: true, titulo: true },
   vida:         { sec: 'vida',     orden: 1, label: 'Parte', cod: 'vida', titulo: true },
   estudio:      { sec: 'vida',     orden: 2, label: 'Estudio bíblico de la congregación', cod: 'estudio_conductor', ayu: 'estudio_lector', ayuLabel: 'Lector', titulo: true },
   visita_sc:    { sec: 'vida',     orden: 2, label: 'Discurso del superintendente de circuito', fijo: true, titulo: true },
@@ -290,8 +291,15 @@ function candidatos(sem, parte, rol, ents = entradas()) {
       const dPar = masCercana(mias.filter(e => e.companero === companero.id), fecha);
       if (dPar != null && Math.abs(dPar) < 120) { score -= 60; avisos.push(`ya fueron pareja ${relativo(dPar)}`); }
     }
-    return { p, motivos, avisos, dMisma, dCualquiera, carga, score };
-  }).sort((a, b) => b.score - a.score || a.p.nombre.localeCompare(b.p.nombre, 'es'));
+    return { p, motivos, avisos, dMisma, dCualquiera, carga, score, azar: sorteo(p.id + sem.lunes + parte.tipo + rol) };
+  }).sort((a, b) => b.score - a.score || a.azar - b.azar);
+}
+
+// Desempate variado pero estable: el mismo puesto da siempre el mismo orden
+function sorteo(texto) {
+  let h = 2166136261;
+  for (let i = 0; i < texto.length; i++) { h ^= texto.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }
 
 function infoCandidato(c) {
@@ -1099,7 +1107,7 @@ function histResumen() {
 }
 
 function abrev(c) {
-  return { presidente: 'Pres', consejero_b: 'Cons', oracion: 'Orac', tesoros: 'Tes', perlas: 'Perl', lectura: 'Lect', maestros: 'Dem', ayudante: 'Ayud', discurso_est: 'Disc', vida: 'Vida', estudio_conductor: 'EBC', estudio_lector: 'Lector' }[c];
+  return { presidente: 'Pres', consejero_b: 'Cons', oracion: 'Orac', tesoros: 'Tes', perlas: 'Perl', lectura: 'Lect', maestros: 'Dem', ayudante: 'Ayud', discurso_est: 'Disc', vida: 'Vida', estudio_conductor: 'EBC', estudio_lector: 'Lector', analisis: '¿Qué?' }[c];
 }
 
 function histDetalle() {

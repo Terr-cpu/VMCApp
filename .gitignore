@@ -2,3 +2,8 @@ node_modules/
 *.log
 .claude/settings.local.json
 _pruebas/
+# Datos reales de la congregación: nunca al repositorio público
+*.xlsx
+*.xls
+*.csv
+!_pruebas/

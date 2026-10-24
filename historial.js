@@ -109,6 +109,7 @@ function parteDesdeTexto(txt) {
   if (!n) return null;
   const sala = /\baux|sala (b|2)|\bb$|\(b\)/.test(n) ? 'B' : 'A';
   const r = (tipo, rol = 'titular') => ({ tipo, rol, sala: TIPOS[tipo].salas || tipo === 'consejero_b' ? (tipo === 'consejero_b' ? 'B' : sala) : 'A' });
+  if (/servicio|superintendente/.test(n)) return { tipo: 'visita_sc', rol: 'titular', sala: 'A' };
   if (/lector/.test(n)) return r('estudio', 'ayudante');
   if (/ayudante|acompanante/.test(n)) return r('maestros', 'ayudante');
   if (/presid/.test(n)) return r('presidente');
@@ -118,8 +119,9 @@ function parteDesdeTexto(txt) {
   if (/lectura/.test(n)) return r('lectura');
   if (/estudio|conductor|ebc/.test(n)) return r('estudio');
   if (/tesoro/.test(n)) return r('tesoros');
+  if (/analisis|que diria/.test(n)) return r('analisis');
   if (/discurso/.test(n)) return r('discurso_est');
-  if (/analisis|que dirias/.test(n)) return r('analisis');
+  if (/analisis|que diria/.test(n)) return r('analisis');
   if (/empiece|empecemos|revisita|discipulo|creencia|demostraci|maestros|conversaci|estudiante|asignacion/.test(n)) return r('maestros');
   if (/vida|necesidades|parte/.test(n)) return r('vida');
   return null;
@@ -142,17 +144,30 @@ function buscarPublicador(texto) {
   return null;
 }
 
-const CAMPOS_LISTA = [['fecha', 'Fecha'], ['publicador', 'Publicador'], ['parte', 'Parte / asignación'], ['ayudante', 'Ayudante'], ['sala', 'Sala'], ['titulo', 'Título / tema']];
+const CAMPOS_LISTA = [['fecha', 'Fecha'], ['publicador', 'Publicador'], ['parte', 'Parte / asignación'], ['rol', 'Papel (estudiante, ayudante…)'],
+  ['ayudante', 'Ayudante'], ['sala', 'Sala'], ['titulo', 'Título / tema'], ['evento', 'Evento (visita, asamblea)'], ['semanal', 'Lectura bíblica semanal']];
 
 function adivinarCampo(cabecera) {
   const n = norm(cabecera);
-  if (/fecha|semana|dia/.test(n)) return 'fecha';
+  if (/^lectura( biblica)? semanal$|^lectura$/.test(n)) return 'semanal';
+  if (/fecha|^semana|^dia/.test(n)) return 'fecha';
   if (/ayudante|acompan/.test(n)) return 'ayudante';
-  if (/sala/.test(n)) return 'sala';
+  if (/^sala/.test(n)) return 'sala';
+  if (/evento/.test(n)) return 'evento';
+  if (/^rol\b|^papel|funcion/.test(n)) return 'rol';
+  if (/parte|asignacion|^tipo/.test(n)) return 'parte';
   if (/titulo|tema|leccion/.test(n)) return 'titulo';
-  if (/parte|asignacion|tipo|papel/.test(n)) return 'parte';
   if (/publicador|nombre|hermano|estudiante|asignado|quien/.test(n)) return 'publicador';
   return '';
+}
+
+// Un título solo se guarda si aporta algo (no repite el nombre de la parte ni es un hueco como «[sin título]»)
+function tituloUtil(titulo, tipo) {
+  const t = String(titulo ?? '').trim();
+  if (!t || t.startsWith('[') || !TIPOS[tipo]?.titulo) return '';
+  const p = parteDesdeTexto(t);
+  if (p && p.tipo === tipo && !['maestros', 'analisis'].includes(tipo)) return '';
+  return t;
 }
 
 // Convierte las filas a asignaciones: [{fecha, tipo, rol, sala, nombre, titulo, ayudante}]
@@ -167,10 +182,22 @@ function interpretar(hoja, cfg) {
       const fecha = fechaDesde(f[col.fecha]);
       const quien = String(f[col.publicador] ?? '').trim();
       if (!fecha || !quien) continue;
-      const pt = parteDesdeTexto(f[col.parte]);
+      let pt = parteDesdeTexto(f[col.parte]);
+      if (col.rol !== '' && col.rol != null) {
+        // El papel dice si es estudiante o ayudante; la parte, cuál (lectura, discurso, ¿qué diría?…)
+        const pr = parteDesdeTexto(f[col.rol]);
+        if (pr && pr.tipo === 'maestros' && pt && ['maestros', 'discurso_est', 'analisis', 'lectura'].includes(pt.tipo)) pt = { ...pt, rol: pr.rol };
+        else if (pr) pt = pr;
+      }
       if (!pt) { avisos.add(`Parte no reconocida: «${f[col.parte]}»`); continue; }
       if (col.sala !== '' && col.sala != null && /aux|b|2/i.test(String(f[col.sala] ?? '')) && (TIPOS[pt.tipo].salas)) pt.sala = 'B';
-      out.push({ fecha, ...pt, nombre: quien, ayudante: col.ayudante !== '' ? String(f[col.ayudante] ?? '').trim() : '', titulo: col.titulo !== '' ? String(f[col.titulo] ?? '').trim() : '' });
+      out.push({
+        fecha, ...pt, nombre: quien,
+        ayudante: col.ayudante !== '' ? String(f[col.ayudante] ?? '').trim() : '',
+        titulo: tituloUtil(col.titulo !== '' ? f[col.titulo] : '', pt.tipo),
+        evento: col.evento !== '' && col.evento != null ? String(f[col.evento] ?? '').trim() : '',
+        semanal: col.semanal !== '' && col.semanal != null ? String(f[col.semanal] ?? '').trim() : '',
+      });
     }
   } else {
     for (const f of datos) {
@@ -207,6 +234,96 @@ function opcionesDestino() {
   return ops;
 }
 
+/* ---------- Lista de hermanos ---------- */
+
+const esSi = v => /^(si|s|x|1|true|verdadero|yes)$/.test(norm(v));
+
+// Qué asignaciones habilita cada columna de una hoja de hermanos
+function codsDesdeCabecera(h, sexo) {
+  const n = norm(h);
+  if (/estudiantil/.test(n)) return sexo === 'M' ? ['maestros', 'ayudante'] : ['lectura', 'maestros', 'ayudante', 'discurso_est'];
+  if (/presid/.test(n)) return ['presidente'];
+  if (/consejero/.test(n)) return ['consejero_b'];
+  if (/oracion/.test(n)) return ['oracion'];
+  if (/tesoro/.test(n)) return ['tesoros'];
+  if (/perla/.test(n)) return ['perlas'];
+  if (/que diria|analisis/.test(n)) return ['analisis'];
+  if (/conductor/.test(n)) return ['estudio_conductor'];
+  if (/lector/.test(n)) return ['estudio_lector'];
+  if (/vida|necesidades/.test(n)) return ['vida'];
+  if (/ayudante/.test(n)) return ['ayudante'];
+  if (/lectura/.test(n)) return ['lectura'];
+  if (/discurso/.test(n)) return ['discurso_est'];
+  return null;
+}
+
+function hojaHermanos(hojas) {
+  for (const h of hojas) {
+    const fila = h.filas.findIndex(f => f.some(c => /^nombre/.test(norm(c))) && f.some(c => /^sexo/.test(norm(c))));
+    if (fila < 0 || fila > 5) continue;
+    const cab = h.filas[fila];
+    const personas = h.filas.slice(fila + 1).filter(f => String(f[cab.findIndex(c => /^nombre/.test(norm(c)))] ?? '').trim());
+    if (personas.length) return { hoja: h, fila, cab, personas };
+  }
+  return null;
+}
+
+function leerHermanos(info) {
+  const { cab, personas } = info;
+  const ix = re => cab.findIndex(c => re.test(norm(c)));
+  const iNom = ix(/^nombre/), iSexo = ix(/^sexo/), iPriv = ix(/^privilegio/), iAct = ix(/^activo/), iFam = ix(/^familia/), iNota = ix(/^nota/), iTel = ix(/telefono|movil/);
+  return personas.map(f => {
+    const nombreP = String(f[iNom]).trim();
+    const sx = norm(f[iSexo]);
+    const sexo = /^(m|mujer|hermana|f|femenino)/.test(sx) ? 'M' : /^(h|hombre|hermano|v|varon|masculino)/.test(sx) ? 'H' : null;
+    const nota = iNota >= 0 ? String(f[iNota] ?? '').trim() : '';
+    const cods = new Set();
+    cab.forEach((h, i) => { if (esSi(f[i])) (codsDesdeCabecera(h, sexo || 'H') || []).forEach(c => cods.add(c)); });
+    if (sexo === 'M') SOLO_VARONES.forEach(c => cods.delete(c));
+    const privTxt = iPriv >= 0 ? norm(f[iPriv]) : '';
+    let privilegio = /anciano/.test(privTxt) ? 'anciano' : /siervo/.test(privTxt) ? 'siervo' : /no bautizado/.test(privTxt) ? 'no_bautizado' : privTxt ? 'publicador' : '';
+    let deducido = false;
+    if (!privilegio) {
+      deducido = true;
+      privilegio = sexo !== 'M' && (cods.has('presidente') || cods.has('estudio_conductor')) ? 'anciano'
+        : sexo !== 'M' && ['tesoros', 'perlas', 'vida'].some(c => cods.has(c)) ? 'siervo' : 'publicador';
+    }
+    const visitante = /superintendente|visitante/i.test(nota);
+    return {
+      nombre: nombreP, sexo, privilegio, deducido, cods: [...cods], nota, visitante,
+      activo: visitante ? false : (iAct >= 0 && String(f[iAct] ?? '').trim() ? !/^no/.test(norm(f[iAct])) : true),
+      familia: iFam >= 0 ? String(f[iFam] ?? '').trim() : '',
+      telefono: iTel >= 0 ? String(f[iTel] ?? '').trim() : '',
+    };
+  });
+}
+
+// Crea los hermanos que no existan y completa los que ya estén
+function aplicarHermanos(lista, sexoPorHistorial) {
+  const res = { creados: 0, actualizados: 0, ids: new Set() };
+  for (const h of lista) {
+    const sexo = h.sexo || sexoPorHistorial(h.nombre) || 'H';
+    const existente = buscarPublicador(h.nombre);
+    if (existente) {
+      existente.asignaciones = [...new Set([...(existente.asignaciones || []), ...h.cods])].filter(c => existente.sexo !== 'M' || !SOLO_VARONES.includes(c));
+      if (!existente.familia && h.familia) existente.familia = h.familia;
+      if (!existente.telefono && h.telefono) existente.telefono = h.telefono;
+      res.actualizados++;
+      continue;
+    }
+    const notas = [h.nota, h.deducido ? 'Privilegio deducido del Excel: revísalo.' : '', !h.sexo ? 'Sexo no indicado en el Excel: revísalo.' : ''].filter(Boolean).join(' ');
+    const p = {
+      id: uid(), nombre: h.nombre, telefono: h.telefono, sexo, privilegio: sexo === 'M' && ['anciano', 'siervo'].includes(h.privilegio) ? 'publicador' : h.privilegio,
+      precursor: false, soloAyudante: h.cods.length === 1 && h.cods[0] === 'ayudante', activo: h.activo,
+      asignaciones: h.cods, ausencias: [], notas, familia: h.familia,
+    };
+    state.publicadores.push(p);
+    res.ids.add(p.id);
+    res.creados++;
+  }
+  return res;
+}
+
 /* ---------- Aplicar al historial ---------- */
 
 function colocar(sem, tipo, rol, sala, id, titulo) {
@@ -227,7 +344,7 @@ function colocar(sem, tipo, rol, sala, id, titulo) {
   return 'ok';
 }
 
-function aplicarHistorial(asignaciones, nuevos) {
+function aplicarHistorial(asignaciones, nuevos, idsHabilitar = new Set()) {
   // Crea los publicadores nuevos que se hayan marcado
   const creados = {};
   for (const [n, sexo] of Object.entries(nuevos)) {
@@ -235,11 +352,19 @@ function aplicarHistorial(asignaciones, nuevos) {
     p.asignaciones = asignacionesSugeridas(p);
     state.publicadores.push(p);
     creados[norm(n)] = p;
+    idsHabilitar.add(p.id);
   }
   const idDe = n => (creados[norm(n)] || buscarPublicador(n))?.id || null;
-  const res = { ok: 0, repetidas: 0, ocupadas: 0, sinPublicador: 0, semanasNuevas: 0 };
+  const res = { ok: 0, repetidas: 0, ocupadas: 0, sinPublicador: 0, semanasNuevas: 0, visitas: 0 };
   const orden = [...asignaciones].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const especiales = new Map();
+  const pendientesLectura = new Map();
   for (const a of orden) {
+    const ev = norm(a.evento);
+    if (a.tipo === 'visita_sc' || /visita|superintendente/.test(ev)) especiales.set(lunesDe(a.fecha), { tipo: 'visita', dia: fromISO(a.fecha).getDay() });
+    else if (/asamblea/.test(ev)) especiales.set(lunesDe(a.fecha), { tipo: 'asamblea', nota: a.evento });
+    if (a.semanal) { const s0 = semanaPorLunes(lunesDe(a.fecha)); if (s0 && !s0.lecturaSemanal) s0.lecturaSemanal = a.semanal.toUpperCase(); else if (!s0) pendientesLectura.set(lunesDe(a.fecha), a.semanal.toUpperCase()); }
+    if (a.tipo === 'visita_sc') continue;
     const id = idDe(a.nombre);
     if (!id) { res.sinPublicador++; continue; }
     const lunes = lunesDe(a.fecha);
@@ -258,12 +383,22 @@ function aplicarHistorial(asignaciones, nuevos) {
         if (p) { p.ayudante = idA; res.ok++; }
       } else res.sinPublicador++;
     }
-    // Los nuevos quedan habilitados para lo que ya han hecho
-    const nuevo = Object.values(creados).find(p => p.id === id);
-    const cod = codDe({ tipo: a.tipo }, a.rol);
-    if (nuevo && cod && !nuevo.asignaciones.includes(cod)) nuevo.asignaciones.push(cod);
+    // Los creados en esta importación quedan habilitados para lo que ya han hecho
+    const marcar = (pid, rol) => {
+      const p = idsHabilitar.has(pid) && pub(pid);
+      const cod = codDe({ tipo: a.tipo }, rol);
+      if (p && cod && !p.asignaciones.includes(cod) && !(p.sexo === 'M' && SOLO_VARONES.includes(cod))) p.asignaciones.push(cod);
+    };
+    marcar(id, a.rol);
   }
   state.semanas.sort((a, b) => a.lunes.localeCompare(b.lunes));
+  for (const [lunes, l] of pendientesLectura) { const s0 = semanaPorLunes(lunes); if (s0 && !s0.lecturaSemanal) s0.lecturaSemanal = l; }
+  for (const [lunes, e] of especiales) {
+    if (e.tipo === 'asamblea' && semanaPorLunes(lunes)?.partes.some(p => p.titular)) continue;
+    if (!especialDe(lunes)) { ponerEspecial(lunes, e.tipo, e); res.visitas++; }
+  }
+  // Las semanas creadas desde el historial se ordenan y llevan las partes fijas aunque estén vacías
+  for (const sem of state.semanas.filter(x => x.importada)) ordenarPartes(sem);
   return res;
 }
 
@@ -277,8 +412,10 @@ function abrirImportarHistorial() {
     const fila = filaForzada ?? Math.max(0, h.filas.findIndex(f => f.filter(x => String(x).trim()).length >= 2));
     const cab = h.filas[fila] || [];
     const reconocidas = cab.filter(c => parteDesdeTexto(c)).length;
-    const lista = { fecha: '', publicador: '', parte: '', ayudante: '', sala: '', titulo: '' };
+    const lista = Object.fromEntries(CAMPOS_LISTA.map(([k]) => [k, '']));
     cab.forEach((c, i) => { const k = adivinarCampo(c); if (k && lista[k] === '') lista[k] = i; });
+    // «Parte / tema» sirve a la vez de parte y de título
+    if (lista.titulo === '' && lista.parte !== '' && /tema|titulo/.test(norm(cab[lista.parte]))) lista.titulo = lista.parte;
     const columnas = cab.map(c => { const p = parteDesdeTexto(c); return p && !/fecha/.test(norm(c)) ? `${p.tipo}|${p.rol}|${p.sala}` : ''; });
     const colFecha = cab.findIndex(c => /fecha|semana/.test(norm(c)));
     d.cfg = { fila, formato: reconocidas >= 3 ? 'cuadro' : 'lista', lista, columnas, colFecha: colFecha < 0 ? 0 : colFecha };
@@ -293,8 +430,9 @@ function abrirImportarHistorial() {
       const h = d.hojas[d.hoja], cab = h.filas[d.cfg.fila] || [];
       const colOps = (sel, vacia = true) => `${vacia ? '<option value="">—</option>' : ''}${cab.map((c, i) => `<option value="${i}" ${String(sel) === String(i) ? 'selected' : ''}>${esc(c || `Columna ${i + 1}`)}</option>`).join('')}`;
       const { asignaciones, avisos } = interpretar(h, d.cfg);
-      const nombres = [...new Set(asignaciones.flatMap(a => [a.nombre, a.ayudante]).filter(Boolean))];
-      const sinCasar = nombres.filter(n => !buscarPublicador(n));
+      const nombres = [...new Set(asignaciones.filter(a => a.tipo !== 'visita_sc').flatMap(a => [a.nombre, a.ayudante]).filter(Boolean))];
+      const deHermanos = d.conHermanos ? new Set(leerHermanos(d.hermanos).map(x => norm(x.nombre))) : new Set();
+      const sinCasar = nombres.filter(n => !buscarPublicador(n) && !deHermanos.has(norm(n)));
       const fechas = asignaciones.map(a => a.fecha).sort();
       html += `<div class="form-grid">
         ${d.hojas.length > 1 ? `<label class="field"><span>Hoja</span><select id="h-hoja">${d.hojas.map((x, i) => `<option value="${i}" ${i === d.hoja ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></label>` : ''}
@@ -311,6 +449,13 @@ function abrirImportarHistorial() {
           <div class="tabla-wrap" style="margin-top:8px"><table><thead><tr><th>Columna del archivo</th><th>Se importa como</th></tr></thead><tbody>
           ${cab.map((c, i) => i === d.cfg.colFecha ? '' : `<tr><td>${esc(c || `Columna ${i + 1}`)}</td><td><select class="h-col" data-i="${i}">${ops.map(([k, v]) => `<option value="${k}" ${d.cfg.columnas[i] === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td></tr>`).join('')}
           </tbody></table></div>`;
+      }
+      if (d.hermanos) {
+        const lista = leerHermanos(d.hermanos);
+        const nuevosH = lista.filter(x => !buscarPublicador(x.nombre)).length;
+        html += `<label class="row" style="margin-top:12px;align-items:flex-start"><input type="checkbox" id="h-hermanos" ${d.conHermanos ? 'checked' : ''}>
+          <span>Importar también la lista de hermanos de la hoja «${esc(d.hermanos.hoja.nombre)}»: <b>${lista.length}</b> personas (${nuevosH} nuevas) con sexo, familia y lo que puede hacer cada una.
+          <span class="small muted">Si no indica el privilegio, se deduce (presidente o conductor → anciano; tesoros, perlas o vida cristiana → siervo) y queda anotado para revisarlo.</span></span></label>`;
       }
       html += `<div class="card" style="margin:14px 0 0;padding:12px">
         <b>${asignaciones.length}</b> asignaciones${fechas.length ? ` del ${fechaCorta(fechas[0])} al ${fechaCorta(fechas[fechas.length - 1])}` : ''} · ${nombres.length} personas
@@ -332,9 +477,23 @@ function abrirImportarHistorial() {
     if (accion !== 'ok') return;
     const { asignaciones } = interpretar(d.hojas[d.hoja], d.cfg);
     if (!asignaciones.length) { d.error = 'No hay ninguna fila válida con esta configuración.'; return pintar(); }
-    const r = aplicarHistorial(asignaciones, d.nuevos);
+    // Si casi todas las fechas caen en el mismo día y no es el configurado, se propone cambiarlo
+    const dias = {};
+    for (const a of asignaciones) { const w = fromISO(a.fecha).getDay(); dias[w] = (dias[w] || 0) + 1; }
+    const [diaTop, nTop] = Object.entries(dias).sort((a, b) => b[1] - a[1])[0];
+    if (Number(diaTop) !== state.config.diaReunion && nTop / asignaciones.length > .8 &&
+      confirm(`Casi todas las fechas del archivo son ${DIAS[diaTop]}, pero la app tiene la reunión el ${DIAS[state.config.diaReunion]}. ¿Cambiar el día de la reunión a ${DIAS[diaTop]}?`)) {
+      state.config.diaReunion = Number(diaTop);
+    }
+    let rh = null;
+    if (d.hermanos && d.conHermanos) {
+      // Para quien no tenga sexo en la lista, se deduce de si ha hecho partes solo de varones
+      const sexoPorHistorial = n => asignaciones.some(a => norm(a.nombre) === norm(n) && (SOLO_VARONES.includes(codDe({ tipo: a.tipo }, a.rol)) || a.tipo === 'visita_sc')) ? 'H' : null;
+      rh = aplicarHermanos(leerHermanos(d.hermanos), sexoPorHistorial);
+    }
+    const r = aplicarHistorial(asignaciones, d.nuevos, rh?.ids);
     cerrarDialogo(); commit();
-    alert(`Historial importado.\n\n${r.ok} asignaciones añadidas${r.semanasNuevas ? ` (${r.semanasNuevas} ${r.semanasNuevas === 1 ? 'semana nueva' : 'semanas nuevas'})` : ''}.` +
+    alert(`Historial importado.\n\n${rh ? `${rh.creados} hermanos creados${rh.actualizados ? ` y ${rh.actualizados} completados` : ''}.\n` : ''}${r.visitas ? `${r.visitas} ${r.visitas === 1 ? 'semana marcada' : 'semanas marcadas'} como visita del superintendente.\n` : ''}${r.ok} asignaciones añadidas${r.semanasNuevas ? ` (${r.semanasNuevas} ${r.semanasNuevas === 1 ? 'semana nueva' : 'semanas nuevas'})` : ''}.` +
       `${r.repetidas ? `\n${r.repetidas} ya estaban y se han saltado.` : ''}` +
       `${r.ocupadas ? `\n${r.ocupadas} no se pusieron porque ese puesto ya tenía a otra persona.` : ''}` +
       `${r.sinPublicador ? `\n${r.sinPublicador} se saltaron porque la persona no está en la lista.` : ''}`);
@@ -346,7 +505,11 @@ function abrirImportarHistorial() {
       if (el.id === 'h-file' && el.files[0]) {
         d.hojas = (await leerArchivoTabla(el.files[0])).filter(h => h.filas.length);
         if (!d.hojas.length) throw new Error('El archivo está vacío.');
-        d.hoja = 0; d.error = ''; d.nuevos = {}; preparar();
+        const pref = d.hojas.findIndex(h => /historial|asignaciones/i.test(h.nombre));
+        d.hoja = pref >= 0 ? pref : d.hojas.reduce((m, h, i, a) => h.filas.length > a[m].filas.length ? i : m, 0);
+        d.hermanos = hojaHermanos(d.hojas);
+        d.conHermanos = !!d.hermanos;
+        d.error = ''; d.nuevos = {}; preparar();
       }
       else if (el.id === 'h-hoja') { d.hoja = Number(el.value); preparar(); }
       else if (el.id === 'h-formato') d.cfg.formato = el.value;
@@ -356,6 +519,7 @@ function abrirImportarHistorial() {
       else if (el.classList.contains('h-col')) d.cfg.columnas[Number(el.dataset.i)] = el.value;
       else if (el.classList.contains('h-nuevo')) { const n = el.dataset.n; if (el.checked) d.nuevos[n] = document.querySelector(`.h-sexo[data-n="${CSS.escape(n)}"]`).value; else delete d.nuevos[n]; }
       else if (el.classList.contains('h-sexo')) { const n = el.dataset.n; if (d.nuevos[n]) d.nuevos[n] = el.value; return; }
+      else if (el.id === 'h-hermanos') d.conHermanos = el.checked;
     } catch (err) { d.error = err.message; }
     pintar();
   };
