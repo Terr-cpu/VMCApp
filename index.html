@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header class="topbar no-print">
@@ -30,10 +30,10 @@
   <div id="aviso" class="aviso no-print" hidden></div>
   <main id="main"></main>
   <dialog id="dlg"><div id="dlg-body"></div></dialog>
-  <script src="guia.js"></script>
-  <script src="drive.js"></script>
-  <script src="stats.js"></script>
-  <script src="app.js"></script>
+  <script src="guia.js?v=4"></script>
+  <script src="drive.js?v=4"></script>
+  <script src="stats.js?v=4"></script>
+  <script src="app.js?v=4"></script>
   <script>
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       navigator.serviceWorker.register('sw.js').catch(() => { });
