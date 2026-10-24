@@ -39,7 +39,10 @@ async function pedirToken(prompt) {
         sync.exp = Date.now() + (Number(r.expires_in) - 60) * 1000;
         res();
       },
-      error_callback: e => rej(new Error(e.type === 'popup_closed' ? 'Se cerró la ventana de Google.' : (e.message || e.type))),
+      error_callback: e => rej(new Error({
+        popup_closed: 'Se cerró la ventana de Google.',
+        popup_failed_to_open: 'El navegador bloqueó la ventana de Google. Permite las ventanas emergentes para esta web y vuelve a pulsar «Conectar».',
+      }[e.type] || e.message || e.type)),
     });
     client.requestAccessToken({ prompt });
   });
