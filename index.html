@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cuadrante VMC</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar no-print">
+    <div class="brand">
+      <span class="logo">VMC</span>
+      <span class="brand-text">Cuadrante <small id="congregacion"></small></span>
+    </div>
+    <nav id="tabs">
+      <button data-vista="cuadrante">Cuadrante</button>
+      <button data-vista="publicadores">Publicadores</button>
+      <button data-vista="historial">Historial</button>
+      <button data-vista="imprimir">Imprimir</button>
+      <button data-vista="ajustes">Ajustes</button>
+    </nav>
+  </header>
+  <div id="aviso" class="aviso no-print" hidden></div>
+  <main id="main"></main>
+  <dialog id="dlg"><div id="dlg-body"></div></dialog>
+  <script src="app.js"></script>
+</body>
+</html>
