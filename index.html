@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cuadrante VMC</title>
+  <meta name="theme-color" content="#9b2d1f">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,9 +20,11 @@
       <button data-vista="cuadrante">Cuadrante</button>
       <button data-vista="publicadores">Publicadores</button>
       <button data-vista="historial">Historial</button>
+      <button data-vista="estadisticas">Estadísticas</button>
       <button data-vista="imprimir">Imprimir</button>
       <button data-vista="ajustes">Ajustes</button>
     </nav>
+    <button id="deshacer" class="deshacer" data-act="deshacer" hidden title="Deshacer el último cambio (Ctrl+Z)">↶ Deshacer</button>
     <button id="sync" class="sync" hidden></button>
   </header>
   <div id="aviso" class="aviso no-print" hidden></div>
@@ -26,6 +32,12 @@
   <dialog id="dlg"><div id="dlg-body"></div></dialog>
   <script src="guia.js"></script>
   <script src="drive.js"></script>
+  <script src="stats.js"></script>
   <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+      navigator.serviceWorker.register('sw.js').catch(() => { });
+    }
+  </script>
 </body>
 </html>

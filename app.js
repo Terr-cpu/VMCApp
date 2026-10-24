@@ -102,7 +102,7 @@ function relativo(dias) {
 function estadoVacio() {
   return {
     version: 1,
-    config: { congregacion: '', diaReunion: 4, salas: 1, partesMaestros: 3, partesVida: 1, prefijo: '34' },
+    config: { congregacion: '', diaReunion: 4, salas: 1, partesMaestros: 3, partesVida: 1, prefijo: '34', minSemanas: 2 },
     publicadores: [],
     semanas: [],
     sustituciones: [],
@@ -121,6 +121,10 @@ function cargar() {
   return estadoVacio();
 }
 let state = cargar();
+const pilaDeshacer = [];
+const instantanea = () => JSON.stringify({ ...state, modificado: undefined });
+let ultimaInstantanea = instantanea();
+function reiniciarDeshacer() { pilaDeshacer.length = 0; ultimaInstantanea = instantanea(); }
 const ui = {
   vista: 'cuadrante',
   lunes: lunesDe(hoyISO()),
@@ -130,6 +134,10 @@ const ui = {
   verInactivos: false,
   mesImprimir: hoyISO().slice(0, 7),
   impr: 'programa',
+  modo: 'semana',
+  mes: hoyISO().slice(0, 7),
+  estPeriodo: '6m',
+  estProg: false,
   semImprimir: '',
 };
 
@@ -138,11 +146,26 @@ function guardarLocal() {
   catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 function guardar() {
+  const ahora = instantanea();
+  if (ahora !== ultimaInstantanea) {
+    pilaDeshacer.push(ultimaInstantanea);
+    if (pilaDeshacer.length > 40) pilaDeshacer.shift();
+    ultimaInstantanea = ahora;
+  }
   state.modificado = new Date().toISOString();
   guardarLocal();
   programarSubida();
 }
 function commit() { guardar(); render(); }
+function deshacer() {
+  if (!pilaDeshacer.length) return;
+  state = normalizar(JSON.parse(pilaDeshacer.pop()));
+  ultimaInstantanea = instantanea();
+  state.modificado = new Date().toISOString();
+  guardarLocal();
+  programarSubida();
+  render();
+}
 
 const pub = id => state.publicadores.find(p => p.id === id);
 const nombre = id => id ? (pub(id)?.nombre ?? '(eliminado)') : '';
@@ -199,12 +222,24 @@ function codDe(parte, rol) {
   const t = TIPOS[parte.tipo];
   return rol === 'ayudante' ? t.ayu : t.cod;
 }
+const familiaDe = p => (p?.familia || '').trim().toLowerCase();
+const mismaFamilia = (a, b) => !!(a && b && familiaDe(a) && familiaDe(a) === familiaDe(b));
+const esParteEstudiante = (parte, rol) => PARTES_ESTUDIANTE.includes(parte.tipo) || (rol === 'ayudante' && parte.tipo === 'maestros');
 
-// Devuelve todos los publicadores activos con su puntuación y motivos de exclusión.
+/*
+ * Puntúa a todos los publicadores activos para un puesto.
+ * motivos = impedimentos (no se sugieren); avisos = pegas leves (bajan la puntuación).
+ */
 function candidatos(sem, parte, rol, ents = entradas()) {
+  const cfg = state.config;
   const cod = codDe(parte, rol);
   const fecha = fechaReunion(sem);
-  const validas = ents.filter(e => e.estado === 'asignada' && e.sem.id !== sem.id);
+  const porPub = new Map();
+  for (const e of ents) {
+    if (e.estado !== 'asignada' || e.sem.id === sem.id) continue;
+    if (!porPub.has(e.pub)) porPub.set(e.pub, []);
+    porPub.get(e.pub).push(e);
+  }
   const ocupados = new Set();
   for (const p of sem.partes) {
     if (p.id === parte.id) {
@@ -215,22 +250,50 @@ function candidatos(sem, parte, rol, ents = entradas()) {
     if (p.titular) ocupados.add(p.titular);
     if (p.ayudante) ocupados.add(p.ayudante);
   }
-  const titular = rol === 'ayudante' ? pub(parte.titular) : null;
+  const t = TIPOS[parte.tipo];
+  const companero = pub(rol === 'ayudante' ? parte.titular : (t.ayu ? parte.ayudante : null));
+  const conSalas = esParteEstudiante(parte, rol) && semTieneAux(sem);
 
   return state.publicadores.filter(p => p.activo).map(p => {
-    const motivos = [];
+    const motivos = [], avisos = [];
     if (!(p.asignaciones || []).includes(cod)) motivos.push('no habilitado');
     if (p.soloAyudante && rol === 'titular') motivos.push('solo ayudante');
     if (ocupados.has(p.id)) motivos.push('ya tiene parte esta semana');
     if (ausente(p, fecha)) motivos.push('ausente');
-    if (titular && titular.sexo !== p.sexo) motivos.push('distinto sexo que el titular');
-    const mias = validas.filter(e => e.pub === p.id);
+    if (companero && t.ayu === 'ayudante' && companero.sexo !== p.sexo && !mismaFamilia(companero, p)) motivos.push('distinto sexo y no es de su familia');
+
+    const mias = porPub.get(p.id) || [];
     const dMisma = masCercana(mias.filter(e => e.cod === cod), fecha);
     const dCualquiera = masCercana(mias, fecha);
-    // Prioriza a quien hace más tiempo que no tiene esta parte, y después cualquier parte
-    const score = Math.min(Math.abs(dMisma ?? 9999), 400) + 0.5 * Math.min(Math.abs(dCualquiera ?? 9999), 400);
-    return { p, motivos, dMisma, dCualquiera, score };
+    const carga = mias.filter(e => Math.abs(diasEntre(fecha, e.fecha)) <= 182).length;
+    // Base: tiempo sin esta parte y sin ninguna parte (máx. 1 año), menos su carga reciente
+    let score = Math.min(Math.abs(dMisma ?? 9999), 365) + 0.6 * Math.min(Math.abs(dCualquiera ?? 9999), 365) - 8 * carga;
+
+    const minSem = p.minSemanas ?? cfg.minSemanas ?? 2;
+    if (dCualquiera != null && Math.abs(dCualquiera) < minSem * 7) {
+      score -= 250;
+      avisos.push(`otra parte ${relativo(dCualquiera)}`);
+    }
+    if (conSalas && p.sala && p.sala !== 'ambas' && p.sala !== parte.sala) {
+      score -= 300;
+      avisos.push(p.sala === 'A' ? 'prefiere sala principal' : 'prefiere sala auxiliar');
+    }
+    if (conSalas) {
+      // Alterna de sala: si su última parte de estudiante fue en esta misma sala, baja un poco
+      const ult = mias.filter(e => PARTES_ESTUDIANTE.includes(e.tipo) && e.fecha < fecha).sort((x, y) => y.fecha.localeCompare(x.fecha))[0];
+      if (ult && ult.sala === parte.sala) score -= 20;
+    }
+    if (companero) {
+      const dPar = masCercana(mias.filter(e => e.companero === companero.id), fecha);
+      if (dPar != null && Math.abs(dPar) < 120) { score -= 60; avisos.push(`ya fueron pareja ${relativo(dPar)}`); }
+    }
+    return { p, motivos, avisos, dMisma, dCualquiera, carga, score };
   }).sort((a, b) => b.score - a.score || a.p.nombre.localeCompare(b.p.nombre, 'es'));
+}
+
+function infoCandidato(c) {
+  const misma = c.dMisma == null ? 'nunca esta parte' : `esta parte ${relativo(c.dMisma)}`;
+  return `${misma} · ${c.carga} en 6 meses`;
 }
 
 function opcionesSelect(sem, parte, rol, ents) {
@@ -239,9 +302,8 @@ function opcionesSelect(sem, parte, rol, ents) {
   const aptos = lista.filter(c => !c.motivos.length);
   const otros = lista.filter(c => c.motivos.length);
   const op = c => {
-    const info = `${c.dMisma == null ? 'nunca esta parte' : 'esta parte ' + relativo(c.dMisma)} · última ${relativo(c.dCualquiera)}`;
-    const extra = c.motivos.length ? ` — ${c.motivos.join(', ')}` : '';
-    return `<option value="${c.p.id}" ${c.p.id === actual ? 'selected' : ''}>${esc(c.p.nombre)} (${info})${esc(extra)}</option>`;
+    const extra = c.motivos.length ? ` — ${c.motivos.join(', ')}` : c.avisos.length ? ` ⚠ ${c.avisos.join(', ')}` : '';
+    return `<option value="${c.p.id}" ${c.p.id === actual ? 'selected' : ''}>${esc(c.p.nombre)} (${infoCandidato(c)})${esc(extra)}</option>`;
   };
   let html = `<option value="">— Sin asignar —</option>`;
   if (aptos.length) html += `<optgroup label="Sugeridos">${aptos.slice(0, 5).map(op).join('')}</optgroup>`;
@@ -251,7 +313,7 @@ function opcionesSelect(sem, parte, rol, ents) {
   return html;
 }
 
-// Pide confirmación si se elige a alguien con motivos de exclusión
+// Pide confirmación si se elige a alguien con impedimentos
 function confirmarNoApto(sem, parte, rol, id) {
   if (!id) return true;
   const c = candidatos(sem, parte, rol).find(c => c.p.id === id);
@@ -259,17 +321,114 @@ function confirmarNoApto(sem, parte, rol, id) {
   return confirm(`${c.p.nombre}: ${c.motivos.join(', ')}.\n\n¿Asignar igualmente?`);
 }
 
+// Rellena los puestos libres empezando por los que tienen menos candidatos posibles
 function sugerirVacios(sem) {
   let n = 0;
-  for (const parte of partesOrdenadas(sem)) {
-    for (const rol of ['titular', 'ayudante']) {
-      if (rol === 'ayudante' && !TIPOS[parte.tipo].ayu) continue;
-      if (parte[rol]) continue;
-      const c = candidatos(sem, parte, rol).find(c => !c.motivos.length);
-      if (c) { parte[rol] = c.p.id; n++; }
+  for (;;) {
+    const ents = entradas();
+    let mejor = null;
+    for (const parte of sem.partes) {
+      for (const rol of ['titular', 'ayudante']) {
+        if (parte[rol] || (rol === 'ayudante' && (!TIPOS[parte.tipo].ayu || !parte.titular))) continue;
+        const aptos = candidatos(sem, parte, rol, ents).filter(c => !c.motivos.length);
+        if (aptos.length && (!mejor || aptos.length < mejor.k)) mejor = { parte, rol, c: aptos[0], k: aptos.length };
+      }
     }
+    if (!mejor) break;
+    mejor.parte[mejor.rol] = mejor.c.p.id;
+    n++;
   }
   return n;
+}
+
+function abrirCandidatos(sem, parte, rol) {
+  const t = TIPOS[parte.tipo];
+  const lista = candidatos(sem, parte, rol);
+  const fila = (c, i) => `<tr class="${c.motivos.length ? 'inactivo' : ''}">
+    <td class="num small muted">${c.motivos.length ? '' : i + 1}</td>
+    <td><b>${esc(c.p.nombre)}</b>${c.p.familia ? ` <span class="small muted">fam. ${esc(c.p.familia)}</span>` : ''}</td>
+    <td class="small">${c.dMisma == null ? '<span class="badge ok">nunca</span>' : relativo(c.dMisma)}</td>
+    <td class="small">${relativo(c.dCualquiera)}</td>
+    <td class="num">${c.carga}</td>
+    <td class="small">${c.motivos.map(m => `<span class="badge danger">${esc(m)}</span>`).join(' ')} ${c.avisos.map(m => `<span class="badge warn">${esc(m)}</span>`).join(' ')}</td>
+    <td><button class="small ${i === 0 && !c.motivos.length ? 'primary' : ''}" data-dlg="elegir" data-id="${c.p.id}">Elegir</button></td></tr>`;
+  const aptos = lista.filter(c => !c.motivos.length), otros = lista.filter(c => c.motivos.length);
+  abrirDialogo(`
+    <h2>Candidatos</h2>
+    <p style="margin-top:0"><b>${t.label}</b>${parte.titulo ? ' — ' + esc(parte.titulo) : ''}${rol === 'ayudante' ? ` (${t.ayuLabel.toLowerCase()})` : ''}${semTieneAux(sem) && t.salas ? ` · ${parte.sala === 'B' ? 'sala auxiliar' : 'sala principal'}` : ''}<br>
+      <span class="small muted">${fechaLarga(fechaReunion(sem))}. Orden: más tiempo sin esta parte y sin intervenir, menos carga en los últimos 6 meses.</span></p>
+    <div class="tabla-wrap"><table>
+      <thead><tr><th></th><th>Publicador</th><th>Esta parte</th><th>Última</th><th class="num">6 m</th><th>Observaciones</th><th></th></tr></thead>
+      <tbody>${aptos.map(fila).join('')}${otros.map(fila).join('')}</tbody></table></div>
+    <div class="dlg-foot"><span></span><button data-dlg="cerrar">Cerrar</button></div>`, () => { });
+  dlgHandler = (accion, el) => {
+    if (accion === 'cerrar') return cerrarDialogo();
+    if (accion !== 'elegir') return;
+    const id = el.dataset.id;
+    if (!confirmarNoApto(sem, parte, rol, id)) return;
+    if (sem.estado === 'publicada' && parte[rol]) { cerrarDialogo(); return abrirSustitucion(sem, parte, rol, id); }
+    parte[rol] = id;
+    marcarAvisado(parte, rol, null);
+    cerrarDialogo(); commit();
+  };
+}
+
+const semanasDesde = (lunes, n) => state.semanas.filter(s => s.lunes >= lunes && s.lunes < addDias(lunes, 7 * n));
+const huecos = sem => sem.sinReunion ? 0 : sem.partes.reduce((n, p) => n + (p.titular ? 0 : 1) + (TIPOS[p.tipo].ayu && !p.ayudante ? 1 : 0), 0);
+
+function abrirRellenar() {
+  const desde = ui.lunes;
+  let n = 4;
+  const pintar = () => {
+    const sems = semanasDesde(desde, n);
+    $('#dlg-body').innerHTML = `
+      <h2>Rellenar varias semanas</h2>
+      <p class="small muted" style="margin-top:0">Rellena los puestos libres de las semanas en borrador, por orden, repartiendo las partes entre todos. Las semanas publicadas no se tocan.</p>
+      <label class="row">Semanas a partir de la actual <input type="number" id="r-n" min="1" max="12" value="${n}" style="width:70px"></label>
+      <ul class="small">${sems.map(s => `<li>${rangoSemana(s.lunes)} — ${s.estado === 'publicada' ? 'publicada (no se toca)' : s.sinReunion ? 'sin reunión' : `${huecos(s)} puestos libres`}</li>`).join('') || '<li>No hay semanas creadas en ese periodo.</li>'}</ul>
+      <div class="dlg-foot"><span></span><span class="row"><button data-dlg="cerrar">Cancelar</button><button class="primary" data-dlg="ok">✨ Rellenar</button></span></div>`;
+  };
+  pintar();
+  $('#dlg-body').onchange = e => { if (e.target.id === 'r-n') { n = Math.max(1, Math.min(12, Number(e.target.value) || 1)); pintar(); } };
+  dlgHandler = accion => {
+    if (accion === 'cerrar') return cerrarDialogo();
+    if (accion !== 'ok') return;
+    let total = 0;
+    for (const s of semanasDesde(desde, n)) if (s.estado !== 'publicada' && !s.sinReunion) total += sugerirVacios(s);
+    cerrarDialogo(); commit();
+    alert(total ? `Se han rellenado ${total} puestos.` : 'No se ha podido rellenar ningún puesto (no hay candidatos aptos).');
+  };
+  $('#dlg').showModal();
+}
+
+/* ================= Problemas de una semana ================= */
+
+function problemasSemana(sem) {
+  const out = [];
+  if (sem.sinReunion) return out;
+  const fecha = fechaReunion(sem);
+  const cuenta = new Map();
+  for (const p of sem.partes) {
+    const t = TIPOS[p.tipo];
+    for (const rol of ['titular', 'ayudante']) {
+      if (rol === 'ayudante' && !t.ayu) continue;
+      const id = p[rol];
+      if (!id) continue;
+      const x = pub(id);
+      const que = `${t.label}${rol === 'ayudante' ? ` (${t.ayuLabel.toLowerCase()})` : ''}`;
+      if (!x) { out.push(`${que}: el publicador asignado ya no existe`); continue; }
+      if (!x.activo) out.push(`${x.nombre} está marcado como inactivo — ${que}`);
+      if (ausente(x, fecha)) out.push(`${x.nombre} estará ausente ese día — ${que}`);
+      if (!(x.asignaciones || []).includes(codDe(p, rol))) out.push(`${x.nombre} no está habilitado para esta parte — ${que}`);
+      cuenta.set(id, (cuenta.get(id) || 0) + 1);
+    }
+    if (t.ayu === 'ayudante' && p.titular && p.ayudante) {
+      const a = pub(p.titular), b = pub(p.ayudante);
+      if (a && b && a.sexo !== b.sexo && !mismaFamilia(a, b)) out.push(`${a.nombre} y ${b.nombre} son de distinto sexo y no constan como familia`);
+    }
+  }
+  for (const [id, n] of cuenta) if (n > 1) out.push(`${nombre(id)} tiene ${n} asignaciones esta semana`);
+  return out;
 }
 
 /* ================= Semanas ================= */
@@ -284,6 +443,26 @@ function ordenarPartes(sem) {
   });
 }
 const partesOrdenadas = sem => { ordenarPartes(sem); return sem.partes; };
+const semTieneAux = sem => sem.partes.some(p => p.sala === 'B');
+
+// La misma parte en la otra sala (misma posición entre las de su tipo)
+function gemela(sem, parte) {
+  if (!TIPOS[parte.tipo].salas) return null;
+  const misma = sem.partes.filter(p => p.tipo === parte.tipo && p.sala === parte.sala);
+  const otra = sem.partes.filter(p => p.tipo === parte.tipo && p.sala !== parte.sala);
+  return otra[misma.indexOf(parte)] || null;
+}
+
+function ponerSalaAux(sem, activar) {
+  if (activar) {
+    for (const p of [...sem.partes]) {
+      if (TIPOS[p.tipo].salas && p.sala === 'A' && !gemela(sem, p)) {
+        sem.partes.push({ ...nuevaParte(p.tipo, 'B', p.titulo), num: p.num, min: p.min, leccion: p.leccion });
+      }
+    }
+    if (!sem.partes.some(p => p.tipo === 'consejero_b')) sem.partes.push(nuevaParte('consejero_b', 'B'));
+  } else sem.partes = sem.partes.filter(p => p.sala !== 'B');
+}
 
 function plantilla() {
   const c = state.config, P = [];
@@ -324,7 +503,9 @@ function render() {
   renderAviso();
   pintarSync();
   const main = $('#main');
-  const vistas = { cuadrante: vistaCuadrante, publicadores: vistaPublicadores, historial: vistaHistorial, imprimir: vistaImprimir, ajustes: vistaAjustes };
+  const vistas = { cuadrante: vistaCuadrante, publicadores: vistaPublicadores, historial: vistaHistorial, estadisticas: vistaEstadisticas, imprimir: vistaImprimir, ajustes: vistaAjustes };
+  const bd = $('#deshacer');
+  bd.hidden = !pilaDeshacer.length;
   main.innerHTML = vistas[ui.vista]();
 }
 
@@ -341,6 +522,7 @@ function renderAviso() {
 /* ================= Vista: Cuadrante ================= */
 
 function vistaCuadrante() {
+  if (ui.modo === 'mes') return navMes() + tiraProximas() + vistaMes();
   const sem = semanaPorLunes(ui.lunes);
   const existentes = state.semanas.map(s =>
     `<option value="${s.lunes}" ${s.lunes === ui.lunes ? 'selected' : ''}>${rangoSemana(s.lunes)}${s.estado === 'publicada' ? ' ✓' : ''}${s.sinReunion ? ' (sin reunión)' : ''}</option>`).join('');
@@ -351,9 +533,15 @@ function vistaCuadrante() {
     <button data-act="sem-next" title="Semana siguiente">▶</button>
     <button data-act="sem-hoy">Hoy</button>
     <input type="date" data-act="sem-fecha" value="${ui.lunes}" title="Ir a fecha">
-    <button data-act="importar-guia">📥 Importar de jw.org</button>
     ${state.semanas.length ? `<select data-act="sem-ir"><option value="">Semanas creadas…</option>${existentes}</select>` : ''}
-  </div>`;
+    <span class="grow"></span>
+    ${selectorModo()}
+  </div>
+  <div class="row acciones-sem">
+    <button data-act="importar-guia">📥 Importar de jw.org</button>
+    <button data-act="rellenar">✨ Rellenar varias semanas</button>
+  </div>
+  ${tiraProximas()}`;
 
   if (!state.publicadores.length) {
     html += `<div class="card"><b>Primero añade publicadores</b> en la pestaña <a href="#" data-act="ir-publicadores">Publicadores</a> para poder asignar partes.</div>`;
@@ -368,14 +556,15 @@ function vistaCuadrante() {
         <button data-act="crear-sem" data-modo="plantilla">Crear con plantilla</button>
         ${hayPrev ? `<button data-act="crear-sem" data-modo="copiar">Copiar estructura de la semana anterior</button>` : ''}
       </div>
-      <p class="small">Plantilla: ${state.config.partesMaestros} partes de «Seamos mejores maestros», ${state.config.partesVida} de «Nuestra vida cristiana»${state.config.salas == 2 ? ', con sala auxiliar' : ''} (cámbialo en Ajustes).</p>
+      <p class="small">Plantilla: ${state.config.partesMaestros} partes de «Seamos mejores maestros», ${state.config.partesVida} de «Nuestra vida cristiana»${state.config.salas == 2 ? ', con sala auxiliar' : ''} (cámbialo en Ajustes). La sala auxiliar también se puede activar en cada semana.</p>
     </div>`;
     return html;
   }
 
   const publicada = sem.estado === 'publicada';
   const ents = entradas();
-  const vacios = sem.partes.reduce((n, p) => n + (p.titular ? 0 : 1) + (TIPOS[p.tipo].ayu && !p.ayudante ? 1 : 0), 0);
+  const vacios = huecos(sem);
+  const problemas = problemasSemana(sem);
 
   html += `<div class="card">
     <div class="row between">
@@ -393,10 +582,12 @@ function vistaCuadrante() {
     <div class="row" style="margin-top:12px">
       <label class="field grow"><span>Lectura bíblica semanal</span>
         <input data-act="lectura-semanal" value="${esc(sem.lecturaSemanal)}" placeholder="p. ej. ISAÍAS 58, 59"></label>
+      ${sem.sinReunion ? '' : `<label class="row" style="margin-top:18px" title="Añade o quita las partes de estudiante de la sala auxiliar en esta semana"><input type="checkbox" data-act="sala-aux" ${semTieneAux(sem) ? 'checked' : ''} ${publicada ? 'disabled' : ''}> Sala auxiliar</label>`}
       <label class="row" style="margin-top:18px"><input type="checkbox" data-act="sin-reunion" ${sem.sinReunion ? 'checked' : ''}> Sin reunión</label>
       ${sem.sinReunion ? `<label class="field grow"><span>Motivo</span><input data-act="motivo-sin" value="${esc(sem.motivoSinReunion)}" placeholder="Asamblea, visita del superintendente…"></label>` : ''}
     </div>
     ${publicada ? `<p class="small muted" style="margin:10px 0 0">La semana está publicada: los cambios de personas se registran como <b>sustituciones</b> en el historial.</p>` : ''}
+    ${problemas.length ? `<div class="problemas">${problemas.map(x => `<div>⚠ ${esc(x)}</div>`).join('')}</div>` : ''}
   </div>`;
 
   if (sem.sinReunion) return html;
@@ -409,7 +600,9 @@ function vistaCuadrante() {
       vida: `<button class="small" data-act="add-parte" data-tipo="vida">+ Parte</button>`,
     }[sec] || '';
     html += `<div class="sec-head sec-${sec}"><span>${secLabel}</span>${add}</div>`;
-    html += partes.map(p => filaParte(sem, p, publicada, ents)).join('') || `<p class="muted small">Sin partes.</p>`;
+    // Las partes de la sala auxiliar con gemela se dibujan junto a la principal
+    const visibles = partes.filter(p => !(p.sala === 'B' && TIPOS[p.tipo].salas && gemela(sem, p)));
+    html += visibles.map(p => filaParte(sem, p, publicada, ents)).join('') || `<p class="muted small">Sin partes.</p>`;
   }
   html += `</div>`;
 
@@ -424,18 +617,25 @@ function vistaCuadrante() {
 
 function filaParte(sem, p, publicada, ents) {
   const t = TIPOS[p.tipo];
-  const salaBadge = state.config.salas == 2 && (t.salas || p.tipo === 'consejero_b') ? `<span class="badge ${p.sala === 'B' ? 'warn' : 'gray'}">Sala ${p.sala === 'B' ? 'aux.' : 'princ.'}</span>` : '';
+  const gem = p.sala === 'A' ? gemela(sem, p) : null;
+  const salaBadge = p.sala === 'B' ? `<span class="badge warn">Sala aux.</span>` : '';
   const borrable = ['maestros', 'discurso_est', 'analisis', 'vida'].includes(p.tipo);
   const titulo = t.titulo
     ? `<input class="titulo" data-act="titulo" data-parte="${p.id}" value="${esc(p.titulo)}" placeholder="Tema / referencia" ${p.tipo === 'maestros' ? 'list="dl-maestros"' : ''}>`
     : '<div></div>';
-  const slots = [slot(sem, p, 'titular', t.ayu ? (p.tipo === 'estudio' ? 'Conductor' : 'Titular') : '', publicada, ents)];
-  if (t.ayu) slots.push(slot(sem, p, 'ayudante', t.ayuLabel, publicada, ents));
+  const bloque = x => {
+    const slots = [slot(sem, x, 'titular', t.ayu ? (p.tipo === 'estudio' ? 'Conductor' : 'Titular') : '', publicada, ents)];
+    if (t.ayu) slots.push(slot(sem, x, 'ayudante', t.ayuLabel, publicada, ents));
+    return slots.join('');
+  };
+  const cuerpo = gem
+    ? `<div class="sala-blk"><span class="sala-tag">Sala principal</span>${bloque(p)}</div><div class="sala-blk aux"><span class="sala-tag">Sala auxiliar</span>${bloque(gem)}</div>`
+    : bloque(p);
   return `<div class="parte">
     <div class="p-tipo">${p.num ? `<span class="muted">${p.num}.</span> ` : ''}${t.label}${salaBadge}
       ${p.min || p.leccion ? `<div class="small muted">${[p.min ? p.min + ' min' : '', p.leccion ? 'lección ' + esc(p.leccion.replace(/^lecci[óo]n /, '')) : ''].filter(Boolean).join(' · ')}</div>` : ''}</div>
     ${titulo}
-    <div class="p-slots">${slots.join('')}</div>
+    <div class="p-slots">${cuerpo}</div>
     <div>${borrable && !publicada ? `<button class="icon small danger" data-act="del-parte" data-parte="${p.id}" title="Quitar parte">✕</button>` : ''}</div>
   </div>`;
 }
@@ -446,7 +646,92 @@ function slot(sem, p, rol, label, publicada, ents) {
     return `<div class="slot">${lab}<div class="fijo">${esc(nombre(p[rol]))}</div>
       <button class="small" data-act="sustituir" data-parte="${p.id}" data-rol="${rol}">Sustituir</button></div>`;
   }
-  return `<div class="slot">${lab}<select data-act="asignar" data-parte="${p.id}" data-rol="${rol}">${opcionesSelect(sem, p, rol, ents)}</select></div>`;
+  return `<div class="slot">${lab}<select data-act="asignar" data-parte="${p.id}" data-rol="${rol}">${opcionesSelect(sem, p, rol, ents)}</select>
+    <button class="small icon" data-act="candidatos" data-parte="${p.id}" data-rol="${rol}" title="Ver candidatos y por qué">🔍</button></div>`;
+}
+
+function selectorModo() {
+  return `<div class="seg"><button data-act="modo" data-modo="semana" class="${ui.modo !== 'mes' ? 'on' : ''}">Semana</button><button data-act="modo" data-modo="mes" class="${ui.modo === 'mes' ? 'on' : ''}">Mes</button></div>`;
+}
+
+function estadoSemana(s) {
+  if (!s) return { cls: 'gray', txt: 'sin programa' };
+  if (s.sinReunion) return { cls: 'gray', txt: 'sin reunión' };
+  const pr = problemasSemana(s).length, h = huecos(s);
+  if (pr) return { cls: 'danger', txt: `${pr} problema${pr > 1 ? 's' : ''}` };
+  if (h) return { cls: 'warn', txt: `${h} libre${h > 1 ? 's' : ''}` };
+  if (s.estado !== 'publicada') return { cls: 'info', txt: 'completa · borrador' };
+  const av = asignacionesDe(s).filter(a => !a.parte.avisos?.[a.rol]).length;
+  if (av) return { cls: 'info', txt: `${av} sin avisar` };
+  return { cls: 'ok', txt: 'lista ✓' };
+}
+
+function tiraProximas() {
+  const base = lunesDe(hoyISO());
+  let html = '';
+  for (let i = 0; i < 8; i++) {
+    const l = addDias(base, 7 * i);
+    const st = estadoSemana(semanaPorLunes(l));
+    const d = fromISO(fechaReunionDeLunes(l));
+    html += `<button class="prox ${st.cls} ${l === ui.lunes && ui.modo !== 'mes' ? 'sel' : ''}" data-act="prox-ir" data-lunes="${l}">
+      <b>${i === 0 ? 'Esta semana' : `${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)}`}</b><span>${st.txt}</span></button>`;
+  }
+  return `<div class="proximas">${html}</div>`;
+}
+
+function navMes() {
+  const [y, m] = ui.mes.split('-').map(Number);
+  return `<div class="semnav">
+    <button data-act="mes-prev" title="Mes anterior">◀</button>
+    <div class="rango">${MESES[m - 1]} ${y}</div>
+    <button data-act="mes-next" title="Mes siguiente">▶</button>
+    <span class="grow"></span>
+    ${selectorModo()}
+  </div>`;
+}
+
+// Cuadrícula del mes: una columna por semana y una fila por puesto
+function vistaMes() {
+  const sems = state.semanas.filter(s => fechaReunion(s).slice(0, 7) === ui.mes);
+  if (!sems.length) return `<div class="card empty">No hay semanas creadas en este mes.</div>`;
+  const filas = new Map();
+  const celdas = new Map();
+  for (const s of sems) {
+    const cuenta = {};
+    for (const p of partesOrdenadas(s)) {
+      const t = TIPOS[p.tipo];
+      const grupo = t.sec === 'maestros' ? 'maestros' : p.tipo;
+      const k = `${grupo}@${p.sala}`;
+      cuenta[k] = (cuenta[k] || 0) + 1;
+      const clave = `${k}#${cuenta[k]}`;
+      if (!filas.has(clave)) {
+        const label = grupo === 'maestros' ? `Maestros ${cuenta[k]}` : t.label + (cuenta[k] > 1 ? ` ${cuenta[k]}` : '');
+        filas.set(clave, { label: label + (p.sala === 'B' && t.salas ? ' · aux.' : ''), orden: [SEC_ORDEN[t.sec], grupo === 'maestros' ? 1 : t.orden, cuenta[k], p.sala] });
+      }
+      celdas.set(`${s.id}|${clave}`, p);
+    }
+  }
+  const orden = [...filas.entries()].sort(([, a], [, b]) => {
+    for (let i = 0; i < 4; i++) if (a.orden[i] !== b.orden[i]) return a.orden[i] < b.orden[i] ? -1 : 1;
+    return 0;
+  });
+  const celda = (s, clave) => {
+    const p = celdas.get(`${s.id}|${clave}`);
+    if (s.sinReunion) return '<td class="muted small">—</td>';
+    if (!p) return '<td></td>';
+    const t = TIPOS[p.tipo];
+    const nombres = [p.titular ? esc(nombre(p.titular)) : '<span class="hueco">libre</span>'];
+    if (t.ayu) nombres.push(p.ayudante ? esc(nombre(p.ayudante)) : '<span class="hueco">libre</span>');
+    return `<td class="click small" data-act="prox-ir" data-lunes="${s.lunes}" data-tip="${esc(t.label + (p.titulo ? ': ' + p.titulo : ''))}">${nombres.join('<br>')}</td>`;
+  };
+  return `<div class="card tabla-wrap"><table class="mes">
+    <thead><tr><th></th>${sems.map(s => {
+      const d = fromISO(fechaReunion(s));
+      const st = estadoSemana(s);
+      return `<th class="click" data-act="prox-ir" data-lunes="${s.lunes}">${DIAS[d.getDay()].slice(0, 3)} ${d.getDate()}<div><span class="badge ${st.cls}">${st.txt}</span></div></th>`;
+    }).join('')}</tr></thead>
+    <tbody>${orden.map(([clave, f]) => `<tr><td class="small"><b>${esc(f.label)}</b></td>${sems.map(s => celda(s, clave)).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
 }
 
 /* ================= Avisos ================= */
@@ -471,7 +756,7 @@ function textoAviso(sem, parte, rol) {
   if (parte.num) que = `intervención ${parte.num}, ${que}`;
   if (rol === 'ayudante') que = `${t.ayuLabel.toLowerCase()} en la ${que}`;
   if (t.ayu && otro) que += rol === 'titular' ? `, con ${nombre(otro)} de ${t.ayuLabel.toLowerCase()}` : `, con ${nombre(otro)}`;
-  if (state.config.salas == 2 && parte.sala === 'B') que += ', en la sala auxiliar';
+  if (parte.sala === 'B') que += ', en la sala auxiliar';
   const nom = (quien?.nombre || '').split(' ')[0];
   return `Hola, ${nom}. Te recuerdo tu asignación en la reunión Vida y Ministerio Cristiano del ${fechaLarga(fechaReunion(sem))}: ${que}. ¡Gracias!`;
 }
@@ -513,7 +798,7 @@ function marcarAvisado(parte, rol, valor = new Date().toISOString()) {
 
 /* ================= Sustitución ================= */
 
-function abrirSustitucion(sem, parte, rol) {
+function abrirSustitucion(sem, parte, rol, preseleccion) {
   const t = TIPOS[parte.tipo];
   const original = parte[rol];
   const ops = opcionesSelect(sem, { ...parte, [rol]: null }, rol)
@@ -531,6 +816,7 @@ function abrirSustitucion(sem, parte, rol) {
       <button data-dlg="cerrar">Cancelar</button>
       <button class="primary" data-dlg="ok">Registrar sustitución</button></span></div>`,
   () => {
+    if (!$('#sus-nuevo')) return;
     const nuevo = $('#sus-nuevo').value || null;
     const motivo = $('#sus-motivo').value.trim();
     if (!nuevo) { alert('Elige quién la sustituye (o vuelve la semana a borrador para dejarla vacía).'); return false; }
@@ -544,6 +830,7 @@ function abrirSustitucion(sem, parte, rol) {
     marcarAvisado(parte, rol, null);
     commit();
   });
+  if (preseleccion) $('#sus-nuevo').value = preseleccion;
 }
 
 function tablaSustituciones(lista) {
@@ -582,12 +869,14 @@ function vistaPublicadores() {
     const ult = pasadas[0], prox = futuras[0];
     const badges = [
       p.precursor ? '<span class="badge ok">Precursor</span>' : '',
+      p.sala === 'A' ? '<span class="badge gray">Sala principal</span>' : p.sala === 'B' ? '<span class="badge gray">Sala auxiliar</span>' : '',
       p.soloAyudante ? '<span class="badge warn">Solo ayudante</span>' : '',
       !p.activo ? '<span class="badge gray">Inactivo</span>' : '',
       ausente(p, hoy) ? '<span class="badge danger">Ausente</span>' : '',
     ].join(' ');
     return `<tr class="click ${p.activo ? '' : 'inactivo'}" data-act="editar-pub" data-id="${p.id}">
-      <td><b>${esc(p.nombre)}</b> <span class="muted small">${p.sexo === 'H' ? '♂' : '♀'}</span><div>${badges}</div></td>
+      <td><b>${esc(p.nombre)}</b> <span class="muted small">${p.sexo === 'H' ? '♂' : '♀'}${p.familia ? ' · fam. ' + esc(p.familia) : ''}</span><div>${badges}</div></td>
+      <td class="num">${mias.filter(e => Math.abs(diasEntre(hoy, e.fecha)) <= 182).length}</td>
       <td>${PRIVILEGIOS[p.privilegio] ?? ''}</td>
       <td><div class="chips">${(p.asignaciones || []).map(c => `<span class="badge gray">${ASIG[c]}</span>`).join('') || '<span class="muted small">ninguna</span>'}</div></td>
       <td class="small">${ult ? `${fechaCorta(ult.fecha)}<br><span class="muted">${TIPOS[ult.tipo].label} · ${relativo(diasEntre(hoy, ult.fecha))}</span>` : '<span class="muted">nunca</span>'}</td>
@@ -606,7 +895,7 @@ function vistaPublicadores() {
     </div>
   </div>
   ${lista.length ? `<div class="card tabla-wrap"><table>
-    <thead><tr><th>Nombre</th><th>Privilegio</th><th>Asignaciones que puede hacer</th><th>Última</th><th>Próxima</th></tr></thead>
+    <thead><tr><th>Nombre</th><th class="num" title="Asignaciones en los últimos 6 meses y próximas">6 m</th><th>Privilegio</th><th>Asignaciones que puede hacer</th><th>Última</th><th>Próxima</th></tr></thead>
     <tbody>${filas}</tbody></table></div>`
     : `<div class="card empty">${state.publicadores.length ? 'Ningún publicador coincide.' : 'Aún no hay publicadores. Pulsa «Añadir publicador».'}</div>`}`;
 }
@@ -641,6 +930,12 @@ function abrirPublicador(id) {
       <label class="field"><span>Privilegio</span>
         <select id="f-priv">${Object.entries(PRIVILEGIOS).filter(([k]) => p.sexo === 'H' || !['anciano', 'siervo'].includes(k))
           .map(([k, v]) => `<option value="${k}" ${p.privilegio === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="field"><span>Familia (permite emparejar hermano y hermana)</span><input id="f-fam" list="dl-fam" value="${esc(p.familia)}" placeholder="p. ej. Pérez García">
+        <datalist id="dl-fam">${[...new Set(state.publicadores.map(x => x.familia).filter(Boolean))].map(f => `<option value="${esc(f)}">`).join('')}</datalist></label>
+      <label class="field"><span>Sala preferida (partes de estudiante)</span><select id="f-sala">
+        ${[['ambas', 'Cualquiera'], ['A', 'Solo sala principal'], ['B', 'Solo sala auxiliar']].map(([k, v]) => `<option value="${k}" ${(p.sala || 'ambas') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="field"><span>Semanas mínimas entre partes</span><input id="f-min" type="number" min="0" max="12" value="${p.minSemanas ?? ''}" placeholder="General (${state.config.minSemanas ?? 2})"></label>
+      <div></div>
       <div class="full row" style="gap:18px">
         <label class="row"><input type="checkbox" id="f-prec" ${p.precursor ? 'checked' : ''}> Precursor regular</label>
         <label class="row"><input type="checkbox" id="f-ayu" ${p.soloAyudante ? 'checked' : ''}> Solo ayudante</label>
@@ -675,6 +970,9 @@ function abrirPublicador(id) {
   const leer = () => {
     p.nombre = $('#f-nombre').value.trim();
     p.telefono = $('#f-tel').value.trim();
+    p.familia = $('#f-fam').value.trim();
+    p.sala = $('#f-sala').value;
+    p.minSemanas = $('#f-min').value === '' ? undefined : Math.max(0, Number($('#f-min').value));
     p.sexo = $('#f-sexo').value;
     p.privilegio = $('#f-priv').value;
     p.precursor = $('#f-prec').checked;
@@ -803,7 +1101,9 @@ function histDetalle() {
     <label class="row small">Hasta <input type="date" data-act="filtro" data-k="hasta" value="${f.hasta}"></label>
     ${f.pub || f.cod || f.desde || f.hasta ? `<button class="small" data-act="filtro-limpiar">Limpiar</button>` : ''}
     <span class="muted small grow" style="text-align:right">${ents.length} registros</span>
+    ${ents.length ? `<button class="small" data-act="csv">⬇ CSV</button>` : ''}
   </div>`;
+  ui.entsFiltradas = ents;
 
   if (!ents.length) return filtros + `<div class="card empty">No hay asignaciones con estos filtros.</div>`;
   return filtros + `<div class="card tabla-wrap"><table>
@@ -813,12 +1113,28 @@ function histDetalle() {
       return `<tr>
       <td class="small">${fechaCorta(e.fecha)}</td>
       <td>${esc(nombre(e.pub))}</td>
-      <td>${t?.label ?? e.tipo}${e.rol === 'ayudante' ? ` <span class="badge gray">${t.ayuLabel.toLowerCase()}</span>` : ''}${state.config.salas == 2 && e.sala === 'B' ? ' <span class="badge warn">sala aux.</span>' : ''}
+      <td>${t?.label ?? e.tipo}${e.rol === 'ayudante' ? ` <span class="badge gray">${t.ayuLabel.toLowerCase()}</span>` : ''}${e.sala === 'B' ? ' <span class="badge warn">sala aux.</span>' : ''}
         ${e.titulo ? `<div class="small muted">${esc(e.titulo)}</div>` : ''}</td>
       <td class="small">${esc(nombre(e.companero))}</td>
       <td>${badgeEstado(e)}${e.estado === 'sustituido' ? `<div class="small muted">por ${esc(nombre(e.sustituto))}${e.motivo ? ' · ' + esc(e.motivo) : ''}</div>` : ''}</td>
     </tr>`;
     }).join('')}</tbody></table></div>`;
+}
+
+function exportarCSV(ents) {
+  const col = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const filas = [['Fecha', 'Publicador', 'Parte', 'Título', 'Papel', 'Sala', 'Compañero', 'Estado', 'Sustituto', 'Motivo']];
+  for (const e of ents) {
+    const t = TIPOS[e.tipo];
+    filas.push([e.fecha, nombre(e.pub), t?.label ?? e.tipo, e.titulo, e.rol === 'ayudante' ? t?.ayuLabel : 'Titular',
+      e.sala === 'B' ? 'Auxiliar' : 'Principal', nombre(e.companero), estadoEntrada(e), nombre(e.sustituto), e.motivo]);
+  }
+  const blob = new Blob(['\ufeff' + filas.map(f => f.map(col).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `vmc-historial-${hoyISO()}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 /* ================= Vista: Imprimir ================= */
@@ -857,7 +1173,7 @@ function imprS89(sems) {
 function hojaS89(s, p) {
   const t = TIPOS[p.tipo];
   const caja = on => `<span class="caja">${on ? '✕' : ''}</span>`;
-  const dos = state.config.salas == 2;
+  const dos = semTieneAux(s);
   return `<div class="s89">
     <h4>ASIGNACIÓN PARA LA REUNIÓN<br>VIDA Y MINISTERIO CRISTIANO</h4>
     <div class="linea"><b>Nombre:</b> <span>${esc(nombre(p.titular))}</span></div>
@@ -881,19 +1197,29 @@ function imprPrograma(sems) {
 
   const bloque = s => {
     const fecha = fromISO(fechaReunion(s));
+    const aux = semTieneAux(s);
+    const cols = aux ? 3 : 2;
     const cab = `<h2><span>${DIAS[fecha.getDay()].toUpperCase()} ${fecha.getDate()} DE ${MESES[fecha.getMonth()].toUpperCase()}</span><span>${esc(s.lecturaSemanal.toUpperCase())}</span></h2>`;
     if (s.sinReunion) return `<div class="p-sem">${cab}<p><i>${esc(s.motivoSinReunion || 'Sin reunión')}</i></p></div>`;
-    let rows = '', secActual = null;
+    const nombresDe = p => {
+      const t = TIPOS[p.tipo];
+      if (p.tipo === 'estudio' && p.ayudante) return `${esc(nombre(p.titular))} / Lector: ${esc(nombre(p.ayudante))}`;
+      return [nombre(p.titular), t.ayu ? nombre(p.ayudante) : ''].filter(Boolean).map(esc).join(' / ') || '—';
+    };
+    let rows = aux ? `<tr class="p-cols"><td></td><td class="n">Sala principal</td><td class="n">Sala auxiliar</td></tr>` : '';
+    let secActual = null;
     for (const p of partesOrdenadas(s)) {
       const t = TIPOS[p.tipo];
+      if (p.sala === 'B' && t.salas && gemela(s, p)) continue;
       if (t.sec !== secActual && ['tesoros', 'maestros', 'vida'].includes(t.sec)) {
-        rows += `<tr class="p-sec ${t.sec}"><td colspan="2">${SECCIONES[SEC_ORDEN[t.sec]][1]}</td></tr>`;
+        rows += `<tr class="p-sec ${t.sec}"><td colspan="${cols}">${SECCIONES[SEC_ORDEN[t.sec]][1]}</td></tr>`;
       }
       secActual = t.sec;
-      const sala = c.salas == 2 && (t.salas || p.tipo === 'consejero_b') && p.sala === 'B' ? ' <i>(sala auxiliar)</i>' : '';
-      const nombres = [nombre(p.titular), t.ayu ? nombre(p.ayudante) : ''].filter(Boolean);
-      const etiqueta = p.tipo === 'estudio' && p.ayudante ? `${esc(nombre(p.titular))} / Lector: ${esc(nombre(p.ayudante))}` : nombres.map(esc).join(' / ');
-      rows += `<tr><td>${p.num ? p.num + '. ' : ''}${t.label}${p.titulo ? `: ${esc(p.titulo)}` : ''}${sala}</td><td class="n">${etiqueta || '—'}</td></tr>`;
+      const label = `${p.num ? p.num + '. ' : ''}${t.label}${p.titulo ? `: ${esc(p.titulo)}` : ''}`;
+      const gem = p.sala === 'A' ? gemela(s, p) : null;
+      if (aux && gem) rows += `<tr><td>${label}</td><td class="n">${nombresDe(p)}</td><td class="n">${nombresDe(gem)}</td></tr>`;
+      else if (aux && p.sala === 'B') rows += `<tr><td>${label}</td><td></td><td class="n">${nombresDe(p)}</td></tr>`;
+      else rows += `<tr><td>${label}</td><td class="n" colspan="${cols - 1}">${nombresDe(p)}</td></tr>`;
     }
     return `<div class="p-sem">${cab}<table>${rows}</table></div>`;
   };
@@ -922,9 +1248,9 @@ function vistaAjustes() {
         ${[1, 2, 3, 4, 5, 6, 0].map(d => `<option value="${d}" ${c.diaReunion === d ? 'selected' : ''}>${DIAS[d]}</option>`).join('')}</select></label>
       <label class="field"><span>Salas</span><select data-act="cfg" data-k="salas" data-num="1">
         <option value="1" ${c.salas == 1 ? 'selected' : ''}>Solo sala principal</option>
-        <option value="2" ${c.salas == 2 ? 'selected' : ''}>Principal + auxiliar</option></select></label>
+        <option value="2" ${c.salas == 2 ? 'selected' : ''}>Principal + auxiliar (por defecto en semanas nuevas)</option></select></label>
       <label class="field"><span>Prefijo telefónico del país (WhatsApp)</span><input data-act="cfg" data-k="prefijo" value="${esc(c.prefijo)}" placeholder="34"></label>
-      <div></div>
+      <label class="field"><span>Semanas mínimas entre partes de una misma persona</span><input type="number" min="0" max="12" data-act="cfg" data-k="minSemanas" data-num="1" value="${c.minSemanas ?? 2}"></label>
       <label class="field"><span>Partes de «Seamos mejores maestros» por defecto</span><input type="number" min="1" max="6" data-act="cfg" data-k="partesMaestros" data-num="1" value="${c.partesMaestros}"></label>
       <label class="field"><span>Partes de «Nuestra vida cristiana» por defecto</span><input type="number" min="1" max="4" data-act="cfg" data-k="partesVida" data-num="1" value="${c.partesVida}"></label>
     </div>
@@ -1001,6 +1327,12 @@ window.addEventListener('beforeunload', e => {
   if (drive.conectado && hayCambiosLocales() && tokenValido()) { sincronizar().catch(() => { }); e.preventDefault(); }
 });
 
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) && !$('#dlg').open) {
+    e.preventDefault(); deshacer();
+  }
+});
+
 $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-vista]');
   if (b) { ui.vista = b.dataset.vista; render(); }
@@ -1021,6 +1353,22 @@ document.addEventListener('click', e => {
     case 'sem-next': ui.lunes = addDias(ui.lunes, 7); render(); break;
     case 'sem-hoy': ui.lunes = lunesDe(hoyISO()); render(); break;
     case 'importar-guia': abrirImportarGuia(); break;
+    case 'rellenar': abrirRellenar(); break;
+    case 'est-periodo': ui.estPeriodo = el.dataset.k; render(); break;
+    case 'candidatos': abrirCandidatos(sem, parte, el.dataset.rol); break;
+    case 'deshacer': deshacer(); break;
+    case 'csv': exportarCSV(ui.entsFiltradas || []); break;
+    case 'modo':
+      ui.modo = el.dataset.modo;
+      if (ui.modo === 'mes') ui.mes = fechaReunionDeLunes(ui.lunes).slice(0, 7);
+      render(); break;
+    case 'prox-ir': ui.lunes = el.dataset.lunes; ui.modo = 'semana'; render(); break;
+    case 'mes-prev': case 'mes-next': {
+      let [y, m] = ui.mes.split('-').map(Number);
+      m += act === 'mes-next' ? 1 : -1;
+      if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; }
+      ui.mes = `${y}-${pad(m)}`; render(); break;
+    }
     case 'aviso-wa': marcarAvisado(parte, el.dataset.rol); setTimeout(commit, 50); break;
     case 'aviso-copiar':
       navigator.clipboard.writeText(textoAviso(sem, parte, el.dataset.rol))
@@ -1050,13 +1398,18 @@ document.addEventListener('click', e => {
     }
     case 'add-parte': {
       const tipo = el.dataset.tipo;
+      const aux = semTieneAux(sem);
       sem.partes.push(nuevaParte(tipo, 'A', tipo === 'discurso_est' ? 'Discurso' : ''));
-      if (TIPOS[tipo].salas && state.config.salas == 2) sem.partes.push(nuevaParte(tipo, 'B', tipo === 'discurso_est' ? 'Discurso' : ''));
+      if (TIPOS[tipo].salas && aux) sem.partes.push(nuevaParte(tipo, 'B', tipo === 'discurso_est' ? 'Discurso' : ''));
       commit(); break;
     }
     case 'del-parte':
-      if (parte && (!parte.titular && !parte.ayudante || confirm('Esta parte tiene personas asignadas. ¿Quitarla?'))) {
-        sem.partes = sem.partes.filter(p => p !== parte); commit();
+      if (parte) {
+        const gem = gemela(sem, parte);
+        const ocupada = [parte, gem].some(p => p && (p.titular || p.ayudante));
+        if (!ocupada || confirm('Esta parte tiene personas asignadas. ¿Quitarla?')) {
+          sem.partes = sem.partes.filter(p => p !== parte && p !== gem); commit();
+        }
       }
       break;
     case 'sustituir': abrirSustitucion(sem, parte, el.dataset.rol); break;
@@ -1068,7 +1421,7 @@ document.addEventListener('click', e => {
     case 'nuevo-pub': abrirPublicador(null); break;
     case 'editar-pub': abrirPublicador(el.dataset.id); break;
     case 'hist-tab': ui.hist = el.dataset.tab; render(); break;
-    case 'hist-pub': ui.hist = 'detalle'; ui.filtro = { pub: el.dataset.id, cod: '', desde: '', hasta: '' }; render(); break;
+    case 'hist-pub': ui.vista = 'historial'; ui.hist = 'detalle'; ui.filtro = { pub: el.dataset.id, cod: '', desde: '', hasta: '' }; render(); break;
     case 'filtro-limpiar': ui.filtro = { pub: '', cod: '', desde: '', hasta: '' }; render(); break;
     case 'imprimir': window.print(); break;
     case 'impr-tab': ui.impr = el.dataset.tab; render(); break;
@@ -1099,11 +1452,23 @@ document.addEventListener('change', e => {
     case 'asignar':
       if (!confirmarNoApto(sem, parte, el.dataset.rol, el.value)) { render(); break; }
       parte[el.dataset.rol] = el.value || null; marcarAvisado(parte, el.dataset.rol, null); commit(); break;
-    case 'titulo': parte.titulo = el.value; guardar(); break;
+    case 'titulo': {
+      parte.titulo = el.value;
+      const gem = gemela(sem, parte);
+      if (gem) gem.titulo = el.value;
+      guardar(); break;
+    }
+    case 'sala-aux': {
+      const quitar = !el.checked;
+      const ocupadas = sem.partes.filter(p => p.sala === 'B' && (p.titular || p.ayudante)).length;
+      if (quitar && ocupadas && !confirm(`Hay ${ocupadas} partes asignadas en la sala auxiliar. ¿Quitarla igualmente?`)) { render(); break; }
+      ponerSalaAux(sem, el.checked); commit(); break;
+    }
     case 'lectura-semanal': sem.lecturaSemanal = el.value; guardar(); break;
     case 'sin-reunion': sem.sinReunion = el.checked; commit(); break;
     case 'motivo-sin': sem.motivoSinReunion = el.value; guardar(); break;
     case 'ver-inactivos': ui.verInactivos = el.checked; render(); break;
+    case 'est-prog': ui.estProg = el.checked; render(); break;
     case 'filtro': ui.filtro[el.dataset.k] = el.value; render(); break;
     case 'mes-imprimir': if (el.value) { ui.mesImprimir = el.value; ui.semImprimir = ''; render(); } break;
     case 'sem-imprimir': ui.semImprimir = el.value; render(); break;

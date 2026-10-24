@@ -141,6 +141,7 @@ async function sincronizar(inicial = false) {
       }
       if (usarRemoto) {
         state = remoto;
+        reiniciarDeshacer();
         guardarLocal();
         drive.remotoMod = meta.modifiedTime;
         drive.subido = state.modificado;
