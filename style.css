@@ -1,38 +1,25 @@
 :root {
-  --bg: #f4f5f7;
-  --card: #ffffff;
-  --text: #1d2330;
-  --muted: #6b7280;
-  --line: #e2e5ea;
-  --accent: #4a5bd6;
-  --accent-soft: #e8ebfb;
-  --ok: #1f8a4c;
-  --warn: #b7791f;
-  --danger: #c0392b;
-  --sec-inicio: #5b6475;
-  --sec-tesoros: #3c7f8b;
-  --sec-maestros: #c18626;
-  --sec-vida: #9b2d1f;
-  --sec-cierre: #5b6475;
-  --radius: 10px;
+  color-scheme: light;
+  --bg: #eef1f8;
+  --card: rgba(255, 255, 255, .62);
+  --text: #1c1c1e;
+  --muted: #6e6e73;
+  --line: rgba(60, 60, 67, .13);
+  --accent: #007aff;
+  --accent-soft: rgba(0, 122, 255, .12);
+  --ok: #248a3d;
+  --warn: #b25000;
+  --danger: #d70015;
+  --sec-inicio: #636978;
+  --sec-tesoros: #2f7f8c;
+  --sec-maestros: #c58312;
+  --sec-vida: #a8321f;
+  --sec-cierre: #636978;
+  --radius: 20px;
   --viz-1: #2a78d6;
   --viz-2: #eb6834;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161b;
-    --card: #1d2027;
-    --text: #e6e8ec;
-    --muted: #9aa1ad;
-    --line: #2e323b;
-    --accent: #8796ff;
-    --accent-soft: #262b45;
-    --ok: #4cc584;
-    --warn: #e2b04a;
-    --danger: #f06b5b;
-    --viz-1: #3987e5;
-    --viz-2: #d95926;
-  }
+  --vidrio: saturate(180%) blur(22px);
+  --sombra: 0 10px 30px rgba(31, 38, 64, .08), 0 1px 2px rgba(31, 38, 64, .06);
 }
 * { box-sizing: border-box; }
 body {
@@ -91,7 +78,6 @@ nav button.on { background: var(--accent-soft); color: var(--accent); font-weigh
   background: #fff6e0; color: #6b4a00; border: 1px solid #f0d58c;
   border-radius: var(--radius); padding: 8px 14px;
 }
-@media (prefers-color-scheme: dark) { .aviso { background: #3a2f12; color: #f2d58a; border-color: #5c4a1a; } }
 
 main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
 .card {
@@ -329,4 +315,139 @@ select { max-width: 100%; }
   .card { padding: 12px; }
   .hoja { padding: 12px; }
   .semnav .rango { font-size: 16px; }
+}
+
+
+/* =====================================================================
+   Tema claro con efecto cristal (estilo iOS)
+   ===================================================================== */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(at 6% 0%, #d6e4ff 0, transparent 45%),
+    radial-gradient(at 96% 6%, #ffdfe9 0, transparent 40%),
+    radial-gradient(at 80% 75%, #ebe2ff 0, transparent 42%),
+    radial-gradient(at 12% 92%, #dcf5ea 0, transparent 45%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { letter-spacing: -.01em; }
+h2 { font-size: 21px; font-weight: 650; }
+
+/* Superficies de cristal */
+.card, .kpi, .prox, .topbar, dialog, .aviso {
+  -webkit-backdrop-filter: var(--vidrio);
+  backdrop-filter: var(--vidrio);
+}
+.card, .kpi {
+  background: rgba(255, 255, 255, .62);
+  border: 1px solid rgba(255, 255, 255, .75);
+  border-radius: var(--radius);
+  box-shadow: var(--sombra);
+}
+.topbar {
+  background: rgba(255, 255, 255, .68);
+  border-bottom: 1px solid rgba(255, 255, 255, .7);
+  box-shadow: 0 1px 0 rgba(60, 60, 67, .08);
+}
+.logo { background: linear-gradient(135deg, #d9452f, #a8321f); border-radius: 9px; box-shadow: 0 3px 8px rgba(168, 50, 31, .3); }
+nav button { border-radius: 99px; padding: 6px 14px; box-shadow: none; }
+nav button:hover { background: rgba(118, 118, 128, .1); border-color: transparent; }
+nav button.on { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 760px) {
+  nav { flex-wrap: nowrap; overflow-x: auto; width: 100%; scrollbar-width: none; }
+  nav button { flex-shrink: 0; }
+}
+
+/* Controles */
+button, a.btn {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .72);
+  border: 1px solid rgba(60, 60, 67, .12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+  transition: transform .12s ease, background .2s ease, box-shadow .2s ease;
+}
+button:hover, a.btn:hover { background: #fff; border-color: rgba(60, 60, 67, .2); }
+button:active, a.btn:active { transform: scale(.97); }
+button:disabled { opacity: .5; cursor: default; transform: none; }
+button.primary, a.btn.primary {
+  background: linear-gradient(180deg, #2b8cff, #007aff);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, .28);
+}
+button.primary:hover, a.btn.primary:hover { background: linear-gradient(180deg, #3d96ff, #0a80ff); }
+button.danger { color: var(--danger); }
+input, select, textarea {
+  background: rgba(255, 255, 255, .78);
+  border: 1px solid rgba(60, 60, 67, .14);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 122, 255, .22); }
+input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; }
+.deshacer, .sync { background: transparent; border-color: transparent; box-shadow: none; }
+
+/* Control segmentado */
+.seg { background: rgba(118, 118, 128, .12); border: 0; border-radius: 10px; padding: 2px; gap: 2px; }
+.seg button { background: transparent; border: 0; border-radius: 8px; box-shadow: none; padding: 5px 13px; }
+.seg button + button { border-left: 0; }
+.seg button.on { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+.subtabs button { border-radius: 99px; }
+.subtabs button.on { background: var(--accent); border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(0, 122, 255, .25); }
+
+/* Etiquetas */
+.badge { padding: 2px 9px; font-weight: 500; }
+.badge.gray { background: rgba(118, 118, 128, .14); color: var(--muted); }
+
+/* Aviso superior */
+.aviso { background: rgba(255, 204, 0, .2); border: 1px solid rgba(255, 179, 0, .35); border-radius: 14px; color: #7a5200; }
+
+/* Editor de semana */
+.sec-head { border-radius: 12px; padding: 8px 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, .08); }
+.sec-head button { background: rgba(255, 255, 255, .22); border: 0; color: #fff; box-shadow: none; }
+.sec-head button:hover { background: rgba(255, 255, 255, .34); }
+.sec-inicio, .sec-cierre { background: linear-gradient(135deg, #767c8c, #5a6070); }
+.sec-tesoros { background: linear-gradient(135deg, #3a95a3, #2a7380); }
+.sec-maestros { background: linear-gradient(135deg, #dc9a28, #bb7a0c); }
+.sec-vida { background: linear-gradient(135deg, #c4452f, #9c2d1c); }
+.parte { border-bottom-color: rgba(60, 60, 67, .09); }
+.sala-blk { background: rgba(255, 255, 255, .55); border: 1px solid rgba(255, 255, 255, .8); border-radius: 14px; }
+.sala-blk.aux { background: rgba(255, 149, 0, .08); border-color: rgba(255, 149, 0, .15); }
+.slot .fijo { background: rgba(255, 255, 255, .6); border: 1px solid rgba(60, 60, 67, .08); border-radius: 10px; }
+.problemas { background: rgba(255, 59, 48, .08); border: 1px solid rgba(255, 59, 48, .15); border-radius: 12px; }
+
+/* Próximas semanas */
+.prox { background: rgba(255, 255, 255, .6); border: 1px solid rgba(255, 255, 255, .75); border-left-width: 4px; border-radius: 14px; box-shadow: 0 2px 8px rgba(31, 38, 64, .05); }
+.prox.sel { outline: 2px solid var(--accent); }
+
+/* Tablas */
+th, td { border-bottom-color: rgba(60, 60, 67, .09); }
+tr.click:hover td, td.click:hover, th.click:hover { background: rgba(0, 122, 255, .06); }
+table.mes td, table.mes th { border-right-color: rgba(60, 60, 67, .09); }
+table.mapa td.heat { border-color: transparent; border-radius: 6px; }
+.hbar:hover { background: rgba(0, 122, 255, .06); }
+
+/* Diálogo */
+dialog {
+  background: rgba(255, 255, 255, .84);
+  border: 1px solid rgba(255, 255, 255, .85);
+  border-radius: 24px;
+  box-shadow: 0 24px 70px rgba(20, 25, 40, .22);
+}
+dialog::backdrop { background: rgba(30, 35, 50, .22); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+
+/* Estadísticas */
+.kpi-v { font-weight: 700; letter-spacing: -.02em; }
+.tip { background: rgba(28, 28, 30, .88); color: #fff; border-radius: 10px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+
+/* Navegadores sin efecto cristal */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card, .kpi, .prox, .topbar { background: rgba(255, 255, 255, .94); }
+  dialog { background: #fff; }
+}
+
+@media print {
+  body { background: #fff; }
+  .card { background: #fff; box-shadow: none; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
