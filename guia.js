@@ -163,7 +163,7 @@ function parsearSemana(doc, anio) {
 }
 
 // Convierte una semana de la Guía en partes de la app (con sala auxiliar si procede)
-function partesDesdeGuia(g, dos = state.config.salas == 2) {
+function partesDesdeGuia(g, dos = quiereAux(g.lunes)) {
   const P = [nuevaParte('presidente')];
   if (dos) P.push(nuevaParte('consejero_b', 'B'));
   P.push(nuevaParte('oracion_ini'));
@@ -178,7 +178,7 @@ function partesDesdeGuia(g, dos = state.config.salas == 2) {
 // Crea la semana o actualiza su programa conservando las personas ya asignadas
 function aplicarSemanaGuia(g) {
   const sem = semanaPorLunes(g.lunes);
-  const nuevas = partesDesdeGuia(g, sem ? semTieneAux(sem) : state.config.salas == 2);
+  const nuevas = partesDesdeGuia(g, sem ? semTieneAux(sem) || (sem.importada && quiereAux(g.lunes) && sem.lunes >= lunesDe(hoyISO())) : quiereAux(g.lunes));
   if (!sem) {
     const s = { id: uid(), lunes: g.lunes, lecturaSemanal: g.lectura, canciones: g.canciones, estado: 'borrador', sinReunion: false, motivoSinReunion: '', partes: nuevas };
     aplicarEspecial(s);

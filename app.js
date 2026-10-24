@@ -476,14 +476,30 @@ function ponerSalaAux(sem, activar) {
   } else sem.partes = sem.partes.filter(p => p.sala !== 'B');
 }
 
-function plantilla() {
+// ¿Lleva sala auxiliar una semana nueva? Sí si está en Ajustes o si la semana anterior la tenía
+function semanaAnteriorNormal(lunes) {
+  return [...state.semanas]
+    .filter(s => s.lunes < lunes && !s.sinReunion && !s.partes.some(p => p.tipo === 'visita_sc'))
+    .sort((a, b) => b.lunes.localeCompare(a.lunes))[0] || null;
+}
+function quiereAux(lunes) {
+  if (especialDe(lunes)?.tipo === 'visita') return false;
+  if (state.config.salas == 2) return true;
+  const prev = lunes && semanaAnteriorNormal(lunes);
+  return !!(prev && semTieneAux(prev));
+}
+// Semanas futuras con reunión normal que aún no tienen la sala auxiliar
+const semanasSinAux = () => state.semanas.filter(s => s.lunes >= lunesDe(hoyISO()) && !s.sinReunion && !semTieneAux(s) && !s.partes.some(p => p.tipo === 'visita_sc'));
+
+function plantilla(lunes) {
   const c = state.config, P = [];
+  const aux = quiereAux(lunes);
   const conSalas = (tipo, titulo = '') => {
     P.push(nuevaParte(tipo, 'A', titulo));
-    if (c.salas == 2) P.push(nuevaParte(tipo, 'B', titulo));
+    if (aux) P.push(nuevaParte(tipo, 'B', titulo));
   };
   P.push(nuevaParte('presidente'));
-  if (c.salas == 2) P.push(nuevaParte('consejero_b', 'B'));
+  if (aux) P.push(nuevaParte('consejero_b', 'B'));
   P.push(nuevaParte('oracion_ini'));
   P.push(nuevaParte('tesoros'));
   P.push(nuevaParte('perlas'));
@@ -499,8 +515,8 @@ function crearSemana(lunes, modo) {
   let partes;
   if (modo === 'copiar') {
     const prev = [...state.semanas].filter(s => s.lunes < lunes && !s.sinReunion).sort((a, b) => b.lunes.localeCompare(a.lunes))[0];
-    partes = prev ? prev.partes.map(p => nuevaParte(p.tipo, p.sala, ['maestros', 'discurso_est'].includes(p.tipo) ? p.titulo : '')) : plantilla();
-  } else partes = plantilla();
+    partes = prev ? prev.partes.map(p => nuevaParte(p.tipo, p.sala, ['maestros', 'discurso_est'].includes(p.tipo) ? p.titulo : '')) : plantilla(lunes);
+  } else partes = plantilla(lunes);
   const sem = { id: uid(), lunes, lecturaSemanal: '', estado: 'borrador', sinReunion: false, motivoSinReunion: '', partes };
   aplicarEspecial(sem);
   state.semanas.push(sem);
@@ -1463,7 +1479,8 @@ function vistaAjustes() {
         ${[1, 2, 3, 4, 5, 6, 0].map(d => `<option value="${d}" ${c.diaReunion === d ? 'selected' : ''}>${DIAS[d]}</option>`).join('')}</select></label>
       <label class="field"><span>Salas</span><select data-act="cfg" data-k="salas" data-num="1">
         <option value="1" ${c.salas == 1 ? 'selected' : ''}>Solo sala principal</option>
-        <option value="2" ${c.salas == 2 ? 'selected' : ''}>Principal + auxiliar (por defecto en semanas nuevas)</option></select></label>
+        <option value="2" ${c.salas == 2 ? 'selected' : ''}>Principal + auxiliar (por defecto en semanas nuevas)</option></select>
+        ${semanasSinAux().length ? `<button class="small" style="margin-top:6px" data-act="aux-futuras">+ Añadir la sala auxiliar a ${semanasSinAux().length} ${semanasSinAux().length === 1 ? 'semana futura que no la tiene' : 'semanas futuras que no la tienen'}</button>` : ''}</label>
       <label class="field"><span>Hora de comienzo de la reunión</span><input type="time" data-act="cfg" data-k="horaReunion" value="${c.horaReunion || '19:00'}"></label>
       <label class="field"><span>Prefijo telefónico del país (WhatsApp)</span><input data-act="cfg" data-k="prefijo" value="${esc(c.prefijo)}" placeholder="34"></label>
       <label class="field"><span>Semanas mínimas entre partes de una misma persona</span><input type="number" min="0" max="12" data-act="cfg" data-k="minSemanas" data-num="1" value="${c.minSemanas ?? 2}"></label>
@@ -1587,6 +1604,7 @@ document.addEventListener('click', e => {
     case 'sem-hoy': ui.lunes = lunesDe(hoyISO()); render(); break;
     case 'importar-guia': abrirImportarGuia(); break;
     case 'rellenar': abrirRellenar(); break;
+    case 'aux-futuras': { const l = semanasSinAux(); l.forEach(s => ponerSalaAux(s, true)); commit(); alert(`Sala auxiliar añadida a ${l.length} ${l.length === 1 ? 'semana' : 'semanas'}.`); break; }
     case 'importar-hist': abrirImportarHistorial(); break;
     case 'ics-pub': icsPublicador(el.dataset.id); break;
     case 'ics-mes': icsMes(ui.mesImprimir); break;
@@ -1734,7 +1752,11 @@ document.addEventListener('change', e => {
     case 'mes-imprimir': if (el.value) { ui.mesImprimir = el.value; ui.semImprimir = ''; render(); } break;
     case 'sem-imprimir': ui.semImprimir = el.value; render(); break;
     case 'drive-client': drive.clientId = el.value.trim(); guardarDrive(); break;
-    case 'cfg': state.config[el.dataset.k] = el.dataset.num ? Number(el.value) : el.value; commit(); break;
+    case 'cfg':
+      state.config[el.dataset.k] = el.dataset.num ? Number(el.value) : el.value;
+      if (el.dataset.k === 'salas' && state.config.salas == 2 && semanasSinAux().length &&
+        confirm(`Hay ${semanasSinAux().length} semanas futuras sin sala auxiliar. ¿Añadírsela ahora?`)) semanasSinAux().forEach(s => ponerSalaAux(s, true));
+      commit(); break;
   }
 });
 

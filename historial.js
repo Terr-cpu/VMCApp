@@ -399,6 +399,12 @@ function aplicarHistorial(asignaciones, nuevos, idsHabilitar = new Set()) {
   }
   // Las semanas creadas desde el historial se ordenan y llevan las partes fijas aunque estén vacías
   for (const sem of state.semanas.filter(x => x.importada)) ordenarPartes(sem);
+  // Si las últimas semanas usan sala auxiliar, las nuevas también la llevarán
+  const recientes = state.semanas.filter(x => !x.sinReunion && !x.partes.some(p => p.tipo === 'visita_sc')).slice(-4);
+  if (state.config.salas != 2 && recientes.length && recientes.filter(semTieneAux).length >= Math.ceil(recientes.length / 2)) {
+    state.config.salas = 2;
+    res.auxActivada = true;
+  }
   return res;
 }
 
@@ -493,7 +499,7 @@ function abrirImportarHistorial() {
     }
     const r = aplicarHistorial(asignaciones, d.nuevos, rh?.ids);
     cerrarDialogo(); commit();
-    alert(`Historial importado.\n\n${rh ? `${rh.creados} hermanos creados${rh.actualizados ? ` y ${rh.actualizados} completados` : ''}.\n` : ''}${r.visitas ? `${r.visitas} ${r.visitas === 1 ? 'semana marcada' : 'semanas marcadas'} como visita del superintendente.\n` : ''}${r.ok} asignaciones añadidas${r.semanasNuevas ? ` (${r.semanasNuevas} ${r.semanasNuevas === 1 ? 'semana nueva' : 'semanas nuevas'})` : ''}.` +
+    alert(`Historial importado.\n\n${rh ? `${rh.creados} hermanos creados${rh.actualizados ? ` y ${rh.actualizados} completados` : ''}.\n` : ''}${r.visitas ? `${r.visitas} ${r.visitas === 1 ? 'semana marcada' : 'semanas marcadas'} como visita del superintendente.\n` : ''}${r.auxActivada ? 'Sala auxiliar activada para las semanas nuevas.' + String.fromCharCode(10) : ''}${r.ok} asignaciones añadidas${r.semanasNuevas ? ` (${r.semanasNuevas} ${r.semanasNuevas === 1 ? 'semana nueva' : 'semanas nuevas'})` : ''}.` +
       `${r.repetidas ? `\n${r.repetidas} ya estaban y se han saltado.` : ''}` +
       `${r.ocupadas ? `\n${r.ocupadas} no se pusieron porque ese puesto ya tenía a otra persona.` : ''}` +
       `${r.sinPublicador ? `\n${r.sinPublicador} se saltaron porque la persona no está en la lista.` : ''}`);
