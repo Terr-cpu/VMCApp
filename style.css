@@ -178,6 +178,31 @@ dialog::backdrop { background: rgba(10,12,20,.45); }
 .dlg-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
 
+a.btn {
+  display: inline-block; text-decoration: none; text-align: center;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  border-radius: 7px; padding: 6px 12px;
+}
+a.btn.small { padding: 3px 8px; font-size: 13px; }
+a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+a.btn:hover { border-color: var(--accent); }
+.sync { border-color: transparent; background: transparent; font-size: 13px; color: var(--muted); margin-left: auto; }
+.sync.pend { color: var(--warn); }
+.sync.err { color: var(--danger); }
+
+/* Hojas S-89 */
+.s89-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.s89 { background: #fff; color: #111; border: 1px solid #bbb; padding: 18px 20px; font-size: 13.5px; break-inside: avoid; }
+.s89 h4 { text-align: center; font-size: 14px; margin: 0 0 14px; letter-spacing: .3px; }
+.s89 .linea { display: flex; gap: 6px; margin-bottom: 9px; }
+.s89 .linea b { white-space: nowrap; }
+.s89 .linea span { flex: 1; border-bottom: 1px solid #555; min-height: 18px; }
+.s89 .salas { margin: 12px 0 8px; }
+.s89 .salas div { margin: 4px 0 0 10px; display: flex; gap: 8px; align-items: center; }
+.s89 .caja { display: inline-flex; width: 14px; height: 14px; border: 1px solid #333; align-items: center; justify-content: center; font-size: 11px; }
+.s89 .nota { font-size: 11.5px; color: #333; margin: 10px 0 0; }
+@media (max-width: 700px) { .s89-grid { grid-template-columns: 1fr; } }
+
 /* Impresión */
 .hoja { background: #fff; color: #111; padding: 24px; border-radius: var(--radius); border: 1px solid var(--line); }
 .hoja h1 { font-size: 18px; text-align: center; margin-bottom: 4px; }
@@ -196,4 +221,7 @@ dialog::backdrop { background: rgba(10,12,20,.45); }
   main { max-width: none; padding: 0; }
   .hoja { border: 0; padding: 0; }
   .p-sec td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .s89-grid { gap: 0; }
+  .s89 { border: 1px dashed #999; height: 13.4cm; }
+  .s89:nth-child(4n) { break-after: page; }
 }

@@ -47,6 +47,7 @@ const TIPOS = {
   lectura:      { sec: 'tesoros',  orden: 3, label: 'Lectura de la Biblia', cod: 'lectura', salas: true, titulo: true },
   maestros:     { sec: 'maestros', orden: 1, label: 'Demostración', cod: 'maestros', ayu: 'ayudante', ayuLabel: 'Ayudante', salas: true, titulo: true },
   discurso_est: { sec: 'maestros', orden: 1, label: 'Discurso', cod: 'discurso_est', salas: true, titulo: true },
+  analisis:     { sec: 'maestros', orden: 1, label: 'Análisis con el auditorio', cod: 'vida', titulo: true },
   vida:         { sec: 'vida',     orden: 1, label: 'Parte', cod: 'vida', titulo: true },
   estudio:      { sec: 'vida',     orden: 2, label: 'Estudio bíblico de la congregación', cod: 'estudio_conductor', ayu: 'estudio_lector', ayuLabel: 'Lector', titulo: true },
   oracion_fin:  { sec: 'cierre',   orden: 1, label: 'Oración final', cod: 'oracion' },
@@ -101,7 +102,7 @@ function relativo(dias) {
 function estadoVacio() {
   return {
     version: 1,
-    config: { congregacion: '', diaReunion: 4, salas: 1, partesMaestros: 3, partesVida: 1 },
+    config: { congregacion: '', diaReunion: 4, salas: 1, partesMaestros: 3, partesVida: 1, prefijo: '34' },
     publicadores: [],
     semanas: [],
     sustituciones: [],
@@ -128,11 +129,18 @@ const ui = {
   buscar: '',
   verInactivos: false,
   mesImprimir: hoyISO().slice(0, 7),
+  impr: 'programa',
+  semImprimir: '',
 };
 
-function guardar() {
+function guardarLocal() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+function guardar() {
+  state.modificado = new Date().toISOString();
+  guardarLocal();
+  programarSubida();
 }
 function commit() { guardar(); render(); }
 
@@ -140,7 +148,8 @@ const pub = id => state.publicadores.find(p => p.id === id);
 const nombre = id => id ? (pub(id)?.nombre ?? '(eliminado)') : '';
 const semanaPorLunes = l => state.semanas.find(s => s.lunes === l);
 const semanaPorId = id => state.semanas.find(s => s.id === id);
-const fechaReunion = s => addDias(s.lunes, (state.config.diaReunion + 6) % 7);
+const fechaReunionDeLunes = l => addDias(l, (state.config.diaReunion + 6) % 7);
+const fechaReunion = s => fechaReunionDeLunes(s.lunes);
 const publicadoresOrdenados = () => [...state.publicadores].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 
 /* ================= Historial (derivado) ================= */
@@ -313,6 +322,7 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.vista === ui.vista));
   $('#congregacion').textContent = state.config.congregacion ? '· ' + state.config.congregacion : '';
   renderAviso();
+  pintarSync();
   const main = $('#main');
   const vistas = { cuadrante: vistaCuadrante, publicadores: vistaPublicadores, historial: vistaHistorial, imprimir: vistaImprimir, ajustes: vistaAjustes };
   main.innerHTML = vistas[ui.vista]();
@@ -322,7 +332,7 @@ function renderAviso() {
   const el = $('#aviso');
   const hayDatos = state.publicadores.length || state.semanas.length;
   const dias = state.ultimoRespaldo ? diasEntre(state.ultimoRespaldo.slice(0, 10), hoyISO()) : null;
-  if (hayDatos && (dias == null || dias > 14)) {
+  if (hayDatos && !drive.conectado && (dias == null || dias > 14)) {
     el.hidden = false;
     el.innerHTML = `Los datos solo están guardados en este navegador. ${dias == null ? 'Aún no has hecho' : `Hace ${dias} días de tu última`} copia de seguridad — <a href="#" data-act="ir-ajustes">descárgala en Ajustes</a>.`;
   } else el.hidden = true;
@@ -341,6 +351,7 @@ function vistaCuadrante() {
     <button data-act="sem-next" title="Semana siguiente">▶</button>
     <button data-act="sem-hoy">Hoy</button>
     <input type="date" data-act="sem-fecha" value="${ui.lunes}" title="Ir a fecha">
+    <button data-act="importar-guia">📥 Importar de jw.org</button>
     ${state.semanas.length ? `<select data-act="sem-ir"><option value="">Semanas creadas…</option>${existentes}</select>` : ''}
   </div>`;
 
@@ -353,7 +364,8 @@ function vistaCuadrante() {
     html += `<div class="card empty">
       <p>No hay programa para esta semana.</p>
       <div class="row" style="justify-content:center">
-        <button class="primary" data-act="crear-sem" data-modo="plantilla">Crear con plantilla</button>
+        <button class="primary" data-act="importar-guia">📥 Importar de la Guía (jw.org)</button>
+        <button data-act="crear-sem" data-modo="plantilla">Crear con plantilla</button>
         ${hayPrev ? `<button data-act="crear-sem" data-modo="copiar">Copiar estructura de la semana anterior</button>` : ''}
       </div>
       <p class="small">Plantilla: ${state.config.partesMaestros} partes de «Seamos mejores maestros», ${state.config.partesVida} de «Nuestra vida cristiana»${state.config.salas == 2 ? ', con sala auxiliar' : ''} (cámbialo en Ajustes).</p>
@@ -401,6 +413,8 @@ function vistaCuadrante() {
   }
   html += `</div>`;
 
+  html += tarjetaAvisos(sem);
+
   const subs = state.sustituciones.filter(x => x.semanaId === sem.id);
   if (subs.length) {
     html += `<div class="card"><h3>Sustituciones de esta semana</h3>${tablaSustituciones(subs)}</div>`;
@@ -411,14 +425,15 @@ function vistaCuadrante() {
 function filaParte(sem, p, publicada, ents) {
   const t = TIPOS[p.tipo];
   const salaBadge = state.config.salas == 2 && (t.salas || p.tipo === 'consejero_b') ? `<span class="badge ${p.sala === 'B' ? 'warn' : 'gray'}">Sala ${p.sala === 'B' ? 'aux.' : 'princ.'}</span>` : '';
-  const borrable = ['maestros', 'discurso_est', 'vida'].includes(p.tipo);
+  const borrable = ['maestros', 'discurso_est', 'analisis', 'vida'].includes(p.tipo);
   const titulo = t.titulo
     ? `<input class="titulo" data-act="titulo" data-parte="${p.id}" value="${esc(p.titulo)}" placeholder="Tema / referencia" ${p.tipo === 'maestros' ? 'list="dl-maestros"' : ''}>`
     : '<div></div>';
   const slots = [slot(sem, p, 'titular', t.ayu ? (p.tipo === 'estudio' ? 'Conductor' : 'Titular') : '', publicada, ents)];
   if (t.ayu) slots.push(slot(sem, p, 'ayudante', t.ayuLabel, publicada, ents));
   return `<div class="parte">
-    <div class="p-tipo">${t.label}${salaBadge}</div>
+    <div class="p-tipo">${p.num ? `<span class="muted">${p.num}.</span> ` : ''}${t.label}${salaBadge}
+      ${p.min || p.leccion ? `<div class="small muted">${[p.min ? p.min + ' min' : '', p.leccion ? 'lección ' + esc(p.leccion.replace(/^lecci[óo]n /, '')) : ''].filter(Boolean).join(' · ')}</div>` : ''}</div>
     ${titulo}
     <div class="p-slots">${slots.join('')}</div>
     <div>${borrable && !publicada ? `<button class="icon small danger" data-act="del-parte" data-parte="${p.id}" title="Quitar parte">✕</button>` : ''}</div>
@@ -432,6 +447,68 @@ function slot(sem, p, rol, label, publicada, ents) {
       <button class="small" data-act="sustituir" data-parte="${p.id}" data-rol="${rol}">Sustituir</button></div>`;
   }
   return `<div class="slot">${lab}<select data-act="asignar" data-parte="${p.id}" data-rol="${rol}">${opcionesSelect(sem, p, rol, ents)}</select></div>`;
+}
+
+/* ================= Avisos ================= */
+
+function asignacionesDe(sem) {
+  const out = [];
+  for (const p of partesOrdenadas(sem)) {
+    if (p.titular) out.push({ parte: p, rol: 'titular', id: p.titular });
+    if (TIPOS[p.tipo].ayu && p.ayudante) out.push({ parte: p, rol: 'ayudante', id: p.ayudante });
+  }
+  return out;
+}
+
+function textoAviso(sem, parte, rol) {
+  const t = TIPOS[parte.tipo];
+  const quien = pub(parte[rol]);
+  const otro = rol === 'titular' ? parte.ayudante : parte.titular;
+  let que;
+  if (parte.tipo === 'discurso_est') que = `discurso${parte.titulo && parte.titulo !== 'Discurso' ? ` «${parte.titulo}»` : ''}`;
+  else if (['maestros', 'analisis', 'vida', 'tesoros'].includes(parte.tipo) && parte.titulo) que = `«${parte.titulo}»`;
+  else que = t.label.toLowerCase() + (parte.titulo ? ` (${parte.titulo})` : '');
+  if (parte.num) que = `intervención ${parte.num}, ${que}`;
+  if (rol === 'ayudante') que = `${t.ayuLabel.toLowerCase()} en la ${que}`;
+  if (t.ayu && otro) que += rol === 'titular' ? `, con ${nombre(otro)} de ${t.ayuLabel.toLowerCase()}` : `, con ${nombre(otro)}`;
+  if (state.config.salas == 2 && parte.sala === 'B') que += ', en la sala auxiliar';
+  const nom = (quien?.nombre || '').split(' ')[0];
+  return `Hola, ${nom}. Te recuerdo tu asignación en la reunión Vida y Ministerio Cristiano del ${fechaLarga(fechaReunion(sem))}: ${que}. ¡Gracias!`;
+}
+
+function telefonoWa(tel) {
+  let d = String(tel || '').replace(/\D/g, '').replace(/^00/, '');
+  if (d && d.length <= 9) d = (state.config.prefijo || '') + d;
+  return d;
+}
+
+function tarjetaAvisos(sem) {
+  const lista = asignacionesDe(sem);
+  if (!lista.length) return '';
+  const pendientes = lista.filter(a => !a.parte.avisos?.[a.rol]).length;
+  return `<div class="card">
+    <div class="row between"><h3 style="margin:0">Avisos</h3>
+      <span class="badge ${pendientes ? 'warn' : 'ok'}">${pendientes ? `${pendientes} sin avisar` : 'Todos avisados'}</span></div>
+    <div class="tabla-wrap" style="margin-top:8px"><table><tbody>${lista.map(a => {
+      const p = pub(a.id);
+      const av = a.parte.avisos?.[a.rol];
+      const tel = telefonoWa(p?.telefono);
+      const url = `https://wa.me/${tel}?text=${encodeURIComponent(textoAviso(sem, a.parte, a.rol))}`;
+      return `<tr>
+        <td><b>${esc(nombre(a.id))}</b>${tel ? '' : ' <span class="small muted">(sin teléfono)</span>'}</td>
+        <td class="small">${TIPOS[a.parte.tipo].label}${a.rol === 'ayudante' ? ` (${TIPOS[a.parte.tipo].ayuLabel.toLowerCase()})` : ''}</td>
+        <td>${av ? `<span class="badge ok">Avisado ${fechaCorta(av.slice(0, 10)).slice(0, 5)}</span>` : '<span class="badge gray">Pendiente</span>'}</td>
+        <td class="row" style="justify-content:flex-end">
+          <a class="btn small" href="${url}" target="_blank" rel="noopener" data-act="aviso-wa" data-parte="${a.parte.id}" data-rol="${a.rol}">WhatsApp</a>
+          <button class="small" data-act="aviso-copiar" data-parte="${a.parte.id}" data-rol="${a.rol}">Copiar</button>
+          ${av ? `<button class="small icon" data-act="aviso-quitar" data-parte="${a.parte.id}" data-rol="${a.rol}" title="Marcar como pendiente">↺</button>` : ''}
+        </td></tr>`;
+    }).join('')}</tbody></table></div></div>`;
+}
+
+function marcarAvisado(parte, rol, valor = new Date().toISOString()) {
+  parte.avisos = { ...(parte.avisos || {}), [rol]: valor };
+  if (!valor) delete parte.avisos[rol];
 }
 
 /* ================= Sustitución ================= */
@@ -464,6 +541,7 @@ function abrirSustitucion(sem, parte, rol) {
       original, sustituto: nuevo, motivo,
     });
     parte[rol] = nuevo;
+    marcarAvisado(parte, rol, null);
     commit();
   });
 }
@@ -546,7 +624,7 @@ function asignacionesSugeridas(p) {
 
 function abrirPublicador(id) {
   const p = id ? structuredClone(pub(id)) : {
-    id: uid(), nombre: '', sexo: 'H', privilegio: 'publicador', precursor: false,
+    id: uid(), nombre: '', telefono: '', sexo: 'H', privilegio: 'publicador', precursor: false,
     soloAyudante: false, activo: true, asignaciones: [], ausencias: [], notas: '',
   };
   const nuevo = !id;
@@ -556,7 +634,8 @@ function abrirPublicador(id) {
     $('#dlg-body').innerHTML = `
     <h2>${nuevo ? 'Nuevo publicador' : 'Editar publicador'}</h2>
     <div class="form-grid">
-      <label class="field full"><span>Nombre y apellidos</span><input id="f-nombre" value="${esc(p.nombre)}" autofocus></label>
+      <label class="field"><span>Nombre y apellidos</span><input id="f-nombre" value="${esc(p.nombre)}" autofocus></label>
+      <label class="field"><span>Teléfono (WhatsApp)</span><input id="f-tel" type="tel" value="${esc(p.telefono)}" placeholder="600 123 456"></label>
       <label class="field"><span>Sexo</span>
         <select id="f-sexo"><option value="H" ${p.sexo === 'H' ? 'selected' : ''}>Hermano</option><option value="M" ${p.sexo === 'M' ? 'selected' : ''}>Hermana</option></select></label>
       <label class="field"><span>Privilegio</span>
@@ -595,6 +674,7 @@ function abrirPublicador(id) {
   // Lee el formulario al objeto p (para no perder cambios al repintar)
   const leer = () => {
     p.nombre = $('#f-nombre').value.trim();
+    p.telefono = $('#f-tel').value.trim();
     p.sexo = $('#f-sexo').value;
     p.privilegio = $('#f-priv').value;
     p.precursor = $('#f-prec').checked;
@@ -743,9 +823,59 @@ function histDetalle() {
 
 /* ================= Vista: Imprimir ================= */
 
+const PARTES_ESTUDIANTE = ['lectura', 'maestros', 'discurso_est'];
+
 function vistaImprimir() {
+  const sems = state.semanas.filter(s => fechaReunion(s).slice(0, 7) === ui.mesImprimir);
+  const tabs = `<div class="subtabs no-print">
+    <button data-act="impr-tab" data-tab="programa" class="${ui.impr !== 's89' ? 'on' : ''}">Programa del mes</button>
+    <button data-act="impr-tab" data-tab="s89" class="${ui.impr === 's89' ? 'on' : ''}">Hojas de asignación (S-89)</button></div>`;
+  return tabs + (ui.impr === 's89' ? imprS89(sems) : imprPrograma(sems));
+}
+
+function imprS89(sems) {
+  const elegidas = ui.semImprimir ? sems.filter(s => s.id === ui.semImprimir) : sems;
+  const hojas = [];
+  for (const s of elegidas) {
+    if (s.sinReunion) continue;
+    for (const p of partesOrdenadas(s)) {
+      if (!PARTES_ESTUDIANTE.includes(p.tipo) || !p.titular) continue;
+      hojas.push(hojaS89(s, p));
+    }
+  }
+  const sinAsignar = elegidas.reduce((n, s) => n + (s.sinReunion ? 0 : s.partes.filter(p => PARTES_ESTUDIANTE.includes(p.tipo) && !p.titular).length), 0);
+  return `<div class="card row no-print">
+    <label class="row">Mes <input type="month" data-act="mes-imprimir" value="${ui.mesImprimir}"></label>
+    <select data-act="sem-imprimir"><option value="">Todas las semanas</option>
+      ${sems.map(s => `<option value="${s.id}" ${ui.semImprimir === s.id ? 'selected' : ''}>${rangoSemana(s.lunes)}</option>`).join('')}</select>
+    <button class="primary" data-act="imprimir" ${hojas.length ? '' : 'disabled'}>🖨 Imprimir / Guardar PDF</button>
+    <span class="muted small">${hojas.length} hojas${sinAsignar ? ` · ${sinAsignar} partes de estudiante sin asignar` : ''}</span>
+  </div>
+  ${hojas.length ? `<div class="s89-grid">${hojas.join('')}</div>` : `<div class="card empty">No hay partes de estudiante asignadas en este periodo.</div>`}`;
+}
+
+function hojaS89(s, p) {
+  const t = TIPOS[p.tipo];
+  const caja = on => `<span class="caja">${on ? '✕' : ''}</span>`;
+  const dos = state.config.salas == 2;
+  return `<div class="s89">
+    <h4>ASIGNACIÓN PARA LA REUNIÓN<br>VIDA Y MINISTERIO CRISTIANO</h4>
+    <div class="linea"><b>Nombre:</b> <span>${esc(nombre(p.titular))}</span></div>
+    <div class="linea"><b>Ayudante:</b> <span>${t.ayu ? esc(nombre(p.ayudante)) : ''}</span></div>
+    <div class="linea"><b>Fecha:</b> <span>${fechaLarga(fechaReunion(s))}</span></div>
+    <div class="linea"><b>Intervención núm.:</b> <span>${p.num ? p.num + ' · ' : ''}${p.tipo === 'lectura' ? t.label + (p.titulo ? ` (${esc(p.titulo)})` : '') : esc(p.titulo || t.label)}</span></div>
+    ${p.leccion ? `<div class="linea"><b>Lección:</b> <span>${esc(p.leccion)}</span></div>` : ''}
+    <div class="salas"><b>Se presentará en:</b>
+      <div>${caja(!dos || p.sala !== 'B')} Sala principal</div>
+      <div>${caja(dos && p.sala === 'B')} Sala auxiliar núm. 1</div>
+      <div>${caja(false)} Sala auxiliar núm. 2</div>
+    </div>
+    <p class="nota"><b>Nota para el estudiante:</b> encontrarás la información para preparar tu intervención en la Guía de actividades. Repasa también la lección indicada.</p>
+  </div>`;
+}
+
+function imprPrograma(sems) {
   const mes = ui.mesImprimir;
-  const sems = state.semanas.filter(s => fechaReunion(s).slice(0, 7) === mes);
   const [y, m] = mes.split('-').map(Number);
   const c = state.config;
 
@@ -763,7 +893,7 @@ function vistaImprimir() {
       const sala = c.salas == 2 && (t.salas || p.tipo === 'consejero_b') && p.sala === 'B' ? ' <i>(sala auxiliar)</i>' : '';
       const nombres = [nombre(p.titular), t.ayu ? nombre(p.ayudante) : ''].filter(Boolean);
       const etiqueta = p.tipo === 'estudio' && p.ayudante ? `${esc(nombre(p.titular))} / Lector: ${esc(nombre(p.ayudante))}` : nombres.map(esc).join(' / ');
-      rows += `<tr><td>${t.label}${p.titulo ? `: ${esc(p.titulo)}` : ''}${sala}</td><td class="n">${etiqueta || '—'}</td></tr>`;
+      rows += `<tr><td>${p.num ? p.num + '. ' : ''}${t.label}${p.titulo ? `: ${esc(p.titulo)}` : ''}${sala}</td><td class="n">${etiqueta || '—'}</td></tr>`;
     }
     return `<div class="p-sem">${cab}<table>${rows}</table></div>`;
   };
@@ -793,11 +923,14 @@ function vistaAjustes() {
       <label class="field"><span>Salas</span><select data-act="cfg" data-k="salas" data-num="1">
         <option value="1" ${c.salas == 1 ? 'selected' : ''}>Solo sala principal</option>
         <option value="2" ${c.salas == 2 ? 'selected' : ''}>Principal + auxiliar</option></select></label>
+      <label class="field"><span>Prefijo telefónico del país (WhatsApp)</span><input data-act="cfg" data-k="prefijo" value="${esc(c.prefijo)}" placeholder="34"></label>
+      <div></div>
       <label class="field"><span>Partes de «Seamos mejores maestros» por defecto</span><input type="number" min="1" max="6" data-act="cfg" data-k="partesMaestros" data-num="1" value="${c.partesMaestros}"></label>
       <label class="field"><span>Partes de «Nuestra vida cristiana» por defecto</span><input type="number" min="1" max="4" data-act="cfg" data-k="partesVida" data-num="1" value="${c.partesVida}"></label>
     </div>
     <p class="small muted">La plantilla solo afecta a las semanas que crees a partir de ahora.</p>
   </div>
+  ${tarjetaDrive()}
   <div class="card">
     <h2>Copia de seguridad</h2>
     <p class="small muted" style="margin-top:0">Los datos se guardan en este navegador. Descarga una copia con regularidad (por ejemplo en esta misma carpeta o en Drive) para no perder el historial.</p>
@@ -860,6 +993,14 @@ $('#dlg').addEventListener('click', e => {
 
 /* ================= Eventos ================= */
 
+$('#sync').addEventListener('click', () => {
+  if (tokenValido() && !sync.error) sincronizar().catch(manejarError);
+  else conectarDrive();
+});
+window.addEventListener('beforeunload', e => {
+  if (drive.conectado && hayCambiosLocales() && tokenValido()) { sincronizar().catch(() => { }); e.preventDefault(); }
+});
+
 $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-vista]');
   if (b) { ui.vista = b.dataset.vista; render(); }
@@ -871,7 +1012,7 @@ document.addEventListener('click', e => {
   const act = el.dataset.act;
   const sem = semanaPorLunes(ui.lunes);
   const parte = sem && el.dataset.parte ? sem.partes.find(p => p.id === el.dataset.parte) : null;
-  if (el.tagName === 'A') e.preventDefault();
+  if (el.tagName === 'A' && act !== 'aviso-wa') e.preventDefault();
 
   switch (act) {
     case 'ir-ajustes': ui.vista = 'ajustes'; render(); break;
@@ -879,6 +1020,14 @@ document.addEventListener('click', e => {
     case 'sem-prev': ui.lunes = addDias(ui.lunes, -7); render(); break;
     case 'sem-next': ui.lunes = addDias(ui.lunes, 7); render(); break;
     case 'sem-hoy': ui.lunes = lunesDe(hoyISO()); render(); break;
+    case 'importar-guia': abrirImportarGuia(); break;
+    case 'aviso-wa': marcarAvisado(parte, el.dataset.rol); setTimeout(commit, 50); break;
+    case 'aviso-copiar':
+      navigator.clipboard.writeText(textoAviso(sem, parte, el.dataset.rol))
+        .then(() => { marcarAvisado(parte, el.dataset.rol); commit(); })
+        .catch(() => prompt('Copia el mensaje:', textoAviso(sem, parte, el.dataset.rol)));
+      break;
+    case 'aviso-quitar': marcarAvisado(parte, el.dataset.rol, null); commit(); break;
     case 'crear-sem': crearSemana(ui.lunes, el.dataset.modo); commit(); break;
     case 'sugerir-vacios': {
       const n = sugerirVacios(sem); commit();
@@ -922,7 +1071,13 @@ document.addEventListener('click', e => {
     case 'hist-pub': ui.hist = 'detalle'; ui.filtro = { pub: el.dataset.id, cod: '', desde: '', hasta: '' }; render(); break;
     case 'filtro-limpiar': ui.filtro = { pub: '', cod: '', desde: '', hasta: '' }; render(); break;
     case 'imprimir': window.print(); break;
+    case 'impr-tab': ui.impr = el.dataset.tab; render(); break;
     case 'exportar': exportar(); break;
+    case 'drive-on': conectarDrive(); break;
+    case 'drive-off': desconectarDrive(); break;
+    case 'drive-sync':
+      if (tokenValido()) { sync.error = ''; sincronizar().catch(manejarError); } else conectarDrive();
+      break;
     case 'importar-btn': $('#importar').click(); break;
     case 'borrar-todo':
       if (confirm('¿Borrar TODOS los datos (publicadores, semanas e historial)? Descarga antes una copia si la necesitas.') && prompt('Escribe BORRAR para confirmar') === 'BORRAR') {
@@ -943,14 +1098,16 @@ document.addEventListener('change', e => {
     case 'sem-ir': if (el.value) { ui.lunes = el.value; render(); } break;
     case 'asignar':
       if (!confirmarNoApto(sem, parte, el.dataset.rol, el.value)) { render(); break; }
-      parte[el.dataset.rol] = el.value || null; commit(); break;
+      parte[el.dataset.rol] = el.value || null; marcarAvisado(parte, el.dataset.rol, null); commit(); break;
     case 'titulo': parte.titulo = el.value; guardar(); break;
     case 'lectura-semanal': sem.lecturaSemanal = el.value; guardar(); break;
     case 'sin-reunion': sem.sinReunion = el.checked; commit(); break;
     case 'motivo-sin': sem.motivoSinReunion = el.value; guardar(); break;
     case 'ver-inactivos': ui.verInactivos = el.checked; render(); break;
     case 'filtro': ui.filtro[el.dataset.k] = el.value; render(); break;
-    case 'mes-imprimir': if (el.value) { ui.mesImprimir = el.value; render(); } break;
+    case 'mes-imprimir': if (el.value) { ui.mesImprimir = el.value; ui.semImprimir = ''; render(); } break;
+    case 'sem-imprimir': ui.semImprimir = el.value; render(); break;
+    case 'drive-client': drive.clientId = el.value.trim(); guardarDrive(); break;
     case 'cfg': state.config[el.dataset.k] = el.dataset.num ? Number(el.value) : el.value; commit(); break;
   }
 });
