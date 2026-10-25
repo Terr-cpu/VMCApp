@@ -271,6 +271,13 @@ function codDe(parte, rol) {
   const t = TIPOS[parte.tipo];
   return rol === 'ayudante' ? t.ayu : t.cod;
 }
+// Cómo se llama una parte al imprimir: «Parte: X» queda solo «X»
+function nombreParteImpr(p) {
+  const t = TIPOS[p.tipo];
+  if (p.tipo === 'vida' && p.titulo) return p.titulo;
+  if (p.tipo === 'necesidades') return t.label;
+  return t.label + (p.titulo ? ': ' + p.titulo : '');
+}
 const familiaDe = p => (p?.familia || '').trim().toLowerCase();
 const mismaFamilia = (a, b) => !!(a && b && familiaDe(a) && familiaDe(a) === familiaDe(b));
 const esParteEstudiante = (parte, rol) => PARTES_ESTUDIANTE.includes(parte.tipo) || (rol === 'ayudante' && parte.tipo === 'maestros');
@@ -822,16 +829,6 @@ function barraCarga(n, max) {
   return `<span class="carga" title="${n} partes en los últimos 6 meses"><span class="carga-t"><span style="width:${max ? Math.max(4, n / max * 100) : 0}%"></span></span>${n} en 6 meses</span>`;
 }
 
-function razones(c) {
-  const r = [];
-  if (c.dMisma == null) r.push('nunca ha tenido esta parte');
-  else r.push(c.dMisma < 0 ? `hizo esta parte ${relativo(c.dMisma)}` : `tiene esta parte ${relativo(c.dMisma)}`);
-  const yaAvisado = c.avisos.some(a => a.startsWith('otra parte'));
-  if (c.dCualquiera != null && c.dCualquiera !== c.dMisma && !yaAvisado) r.push(c.dCualquiera < 0 ? `su última parte fue ${relativo(c.dCualquiera)}` : `tiene otra parte ${relativo(c.dCualquiera)}`);
-  r.push(`${c.carga} ${c.carga === 1 ? 'parte' : 'partes'} en 6 meses`);
-  const txt = r.join(' · ');
-  return txt.charAt(0).toUpperCase() + txt.slice(1);
-}
 
 function registrarSustitucion(sem, parte, rol, nuevo, motivo) {
   state.sustituciones.push({
@@ -1506,7 +1503,7 @@ function imprPrograma(sems) {
         rows += `<tr class="p-sec ${t.sec}"><td colspan="${cols}">${SECCIONES[SEC_ORDEN[t.sec]][1]}</td></tr>`;
       }
       secActual = t.sec;
-      const label = `${p.num ? p.num + '. ' : ''}${t.label}${p.titulo ? `: ${esc(p.titulo)}` : ''}`;
+      const label = `${p.num ? p.num + '. ' : ''}${esc(nombreParteImpr(p))}`;
       const gem = p.sala === 'A' ? gemela(s, p) : null;
       if (aux && gem) rows += `<tr><td>${label}</td><td class="n">${nombresDe(p)}</td><td class="n">${nombresDe(gem)}</td></tr>`;
       else if (aux && p.sala === 'B') rows += `<tr><td>${label}</td><td></td><td class="n">${nombresDe(p)}</td></tr>`;

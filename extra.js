@@ -116,7 +116,7 @@ function horario(s) {
     const tp = TIPOS[p.tipo];
     if (!['tesoros', 'maestros', 'vida'].includes(tp.sec)) continue;
     if (tp.sec === 'vida' && !cancionMedio) { add(3, `Canción${can[1] ? ' ' + can[1] : ''}`, '', 'vida'); cancionMedio = true; }
-    add(p.min || MIN_DEF[p.tipo] || 5, `${p.num ? p.num + '. ' : ''}${tp.label}${p.titulo ? ': ' + p.titulo : ''}`, nombresParte(s, p), tp.sec, { parte: true });
+    add(p.min || MIN_DEF[p.tipo] || 5, `${p.num ? p.num + '. ' : ''}${nombreParteImpr(p)}`, nombresParte(s, p), tp.sec, { parte: true });
     if (PARTES_ESTUDIANTE.includes(p.tipo)) add(1, 'Consejo', pres, tp.sec, { consejo: true });
   }
   add(3, 'Palabras de conclusión', pres, 'cierre');
@@ -267,6 +267,7 @@ function generarDemo() {
       if (gem) Object.assign(gem, { num: p.num, titulo: p.titulo, leccion: p.leccion });
     }
   }
+  migrarNecesidades(state);
   for (const sem of state.semanas) {
     sugerirVacios(sem);
     if (sem.lunes < base) {
@@ -285,6 +286,7 @@ function generarDemo() {
     p.titular = c.p.id;
   });
   state.ultimoRespaldo = new Date().toISOString();
+  migrarNecesidades(state);
   return state;
 }
 
